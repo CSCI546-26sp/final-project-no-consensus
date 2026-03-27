@@ -1,0 +1,85 @@
+services:
+  master:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: dfs-master
+    command: python -m master.server
+    ports:
+      - "5050:5050"
+    networks:
+      - dfs-net
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+
+  chunkserver1:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: dfs-chunk1
+    command: python -m chunkserver.server --id 1 --port 6001
+    ports:
+      - "6001:6001"
+    volumes:
+      - chunk1-data:/app/data
+    networks:
+      - dfs-net
+    depends_on:
+      - master
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+
+  chunkserver2:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: dfs-chunk2
+    command: python -m chunkserver.server --id 2 --port 6002
+    ports:
+      - "6002:6002"
+    volumes:
+      - chunk2-data:/app/data
+    networks:
+      - dfs-net
+    depends_on:
+      - master
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+
+  chunkserver3:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: dfs-chunk3
+    command: python -m chunkserver.server --id 3 --port 6003
+    ports:
+      - "6003:6003"
+    volumes:
+      - chunk3-data:/app/data
+    networks:
+      - dfs-net
+    depends_on:
+      - master
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+
+networks:
+  dfs-net:
+    driver: bridge
+
+volumes:
+  chunk1-data:
+  chunk2-data:
+  chunk3-data:

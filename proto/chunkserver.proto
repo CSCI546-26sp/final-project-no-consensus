@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package dfs;
+
+// Client <-> Chunk Server communication
+
+service ChunkServerService {
+  // Client streams chunk data to the chunk server
+  rpc WriteChunk (stream WriteChunkRequest) returns (WriteChunkResponse);
+
+  // Client requests a chunk, chunk server streams it back
+  rpc ReadChunk (ReadChunkRequest) returns (stream ReadChunkResponse);
+}
+
+// --- Write ---
+
+message WriteChunkRequest {
+  string chunk_handle = 1;
+  bytes data = 2;                        // chunk data (sent in streaming pieces)
+  repeated string forward_addresses = 3; // secondary servers to replicate to
+}
+
+message WriteChunkResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// --- Read ---
+
+message ReadChunkRequest {
+  string chunk_handle = 1;
+}
+
+message ReadChunkResponse {
+  bytes data = 1;  // chunk data (streamed back in pieces)
+}

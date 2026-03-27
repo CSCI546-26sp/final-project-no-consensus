@@ -1,0 +1,102 @@
+syntax = "proto3";
+
+package dfs;
+
+// Client <-> Master communication
+
+service MasterService {
+  // Client requests chunk assignments for a new file upload
+  rpc UploadFile (UploadFileRequest) returns (UploadFileResponse);
+
+  // Client requests chunk locations for downloading a file
+  rpc DownloadFile (DownloadFileRequest) returns (DownloadFileResponse);
+
+  // Client requests file deletion
+  rpc DeleteFile (DeleteFileRequest) returns (DeleteFileResponse);
+
+  // Client requests list of all stored files
+  rpc ListFiles (ListFilesRequest) returns (ListFilesResponse);
+
+  // Client sends a search query, master coordinates and returns results
+  rpc SearchFiles (SearchFilesRequest) returns (SearchFilesResponse);
+}
+
+// --- Upload ---
+
+message UploadFileRequest {
+  string filename = 1;
+  int64 file_size = 2;  // total file size in bytes
+}
+
+message ChunkAssignment {
+  string chunk_handle = 1;          // unique chunk ID
+  int32 chunk_index = 2;            // position in the file (0, 1, 2, ...)
+  repeated string server_addresses = 3;  // addresses of chunk servers to write to
+}
+
+message UploadFileResponse {
+  bool success = 1;
+  string message = 2;
+  repeated ChunkAssignment assignments = 3;
+}
+
+// --- Download ---
+
+message DownloadFileRequest {
+  string filename = 1;
+}
+
+message ChunkLocation {
+  string chunk_handle = 1;
+  int32 chunk_index = 2;
+  repeated string server_addresses = 3;
+}
+
+message DownloadFileResponse {
+  bool success = 1;
+  string message = 2;
+  repeated ChunkLocation locations = 3;
+}
+
+// --- Delete ---
+
+message DeleteFileRequest {
+  string filename = 1;
+}
+
+message DeleteFileResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// --- List ---
+
+message ListFilesRequest {}
+
+message FileInfo {
+  string filename = 1;
+  int64 file_size = 2;
+  int32 num_chunks = 3;
+}
+
+message ListFilesResponse {
+  repeated FileInfo files = 1;
+}
+
+// --- Search ---
+
+message SearchFilesRequest {
+  string query = 1;
+}
+
+message SearchResult {
+  string filename = 1;
+  string chunk_handle = 2;
+  int32 line_number = 3;
+  float score = 4;          // TF-IDF score
+  string snippet = 5;       // text context around the match
+}
+
+message SearchFilesResponse {
+  repeated SearchResult results = 1;
+}
