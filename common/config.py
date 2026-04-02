@@ -18,3 +18,8 @@ REPLICATION_FACTOR = 2
 # Heartbeat
 HEARTBEAT_INTERVAL = 5      # seconds between heartbeats
 HEARTBEAT_MISS_LIMIT = 3    # missed heartbeats before marking dead
+
+#Garbage collection
+GC_INTERVAL = 60
+GC_THRESHOLD = 600
+

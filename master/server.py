@@ -1,0 +1,230 @@
+from collections import defaultdict
+import threading
+import time
+import uuid
+import math
+import grpc
+from concurrent.futures import ThreadPoolExecutor
+
+from common.config import CHUNK_SERVER_PORTS, CHUNK_SIZE, MASTER_PORT, REPLICATION_FACTOR, HEARTBEAT_INTERVAL, HEARTBEAT_MISS_LIMIT
+from common.config import GC_INTERVAL, GC_THRESHOLD
+from proto.master_pb2_grpc import MasterServiceServicer
+from proto.heartbeat_pb2_grpc import HeartbeatServiceServicer
+from proto import master_pb2, heartbeat_pb2, master_pb2_grpc, heartbeat_pb2_grpc
+
+class FileMetaData:
+    filename: str
+    filesize: int
+    num_chunks: int
+    def __init__(self, filename, filesize = 0, num_chunks = 0):
+        self.filename = filename
+        self.filesize = filesize
+        self.num_chunks = num_chunks
+
+class ServerInfo:
+    serverId: int
+    availableDisk: int
+    lastHeartbeat: float
+    alive: bool
+    chunkHandles: set[str]
+    def __init__(self, serverId, availableDisk):
+        self.serverId = serverId
+        self.availableDisk = availableDisk
+        self.lastHeartbeat = 0
+        self.alive = True
+        self.chunkHandles = set()
+
+class MasterServer(MasterServiceServicer, HeartbeatServiceServicer):
+    def __init__(self):
+        self.namespace: dict[str, FileMetaData] = {}
+        self.fileToChunks: dict[str, list[str]] = defaultdict(list)
+        self.chunkToServers: dict[str, set[int]] = {}
+        self.serverInfo: dict[int, ServerInfo] = {}
+        self.lock = threading.Lock()
+        self.deletedFiles: dict[str, float] = {}
+        threading.Thread(target=self._healthCheck, daemon=True).start()
+        threading.Thread(target=self._garbageCollect, daemon=True).start()
+        return
+    
+    def selectServers(self, replicationFactor:int) -> list[ServerInfo]:
+        serverList = sorted([server for server in self.serverInfo.values() if server.alive], 
+                            key = lambda server: server.availableDisk , 
+                            reverse = True)
+        
+        return serverList[0:replicationFactor]
+    
+    def UploadFile(self, 
+                   request : master_pb2.UploadFileRequest, context) -> master_pb2.UploadFileResponse:
+        with self.lock:
+            if request.filename in self.namespace:
+                context.set_code(grpc.StatusCode.ALREADY_EXISTS)
+                context.set_details("File already exists")
+                return master_pb2.UploadFileResponse(success=False, 
+                                                     message="File already exists")
+            
+            numChunks = math.ceil(request.file_size / CHUNK_SIZE)
+            assignments = []
+            for i in range(numChunks):
+                chunkHandle = str(uuid.uuid4())
+                servers = self.selectServers(REPLICATION_FACTOR)
+
+                serverAddresses = [f"dfs-chunk{s.serverId}:{CHUNK_SERVER_PORTS[s.serverId]}" 
+                                   for s in servers]
+                self.fileToChunks[request.filename].append(chunkHandle)
+                self.chunkToServers[chunkHandle] = set(server.serverId for server in servers)
+
+                assignments.append(master_pb2.ChunkAssignment(chunk_handle = chunkHandle, 
+                                                              chunk_index = i, 
+                                                              server_addresses = serverAddresses))
+                
+            self.namespace[request.filename] = FileMetaData(request.filename, 
+                                                            request.file_size, 
+                                                            numChunks)
+            
+            return master_pb2.UploadFileResponse(success = True, assignments = assignments)
+        
+    def DownloadFile(self, 
+                     request : master_pb2.DownloadFileRequest, context) -> master_pb2.DownloadFileResponse:
+        with self.lock:
+            if request.filename.startswith("._deleted_"):
+                context.set_code(grpc.StatusCode.NOT_FOUND)
+                context.set_details("Deleted file needs to be recovered before downloading")
+                return master_pb2.DownloadFileResponse(success = False, 
+                                                       message = "File not found in current namespace, " \
+                                                       "needs to be recovered first")
+            
+            if request.filename not in self.namespace:
+                context.set_code(grpc.StatusCode.NOT_FOUND)
+                context.set_details("File not found in current namespace")
+                return master_pb2.DownloadFileResponse(success = False, 
+                                                       message = "File not found in current namespace")
+            
+            chunkHandles = self.fileToChunks[request.filename]
+            locations = []
+
+            for idx, chunkHandle in enumerate(chunkHandles):
+                serverIds = self.chunkToServers[chunkHandle]
+                aliveAddresses = [
+                    f"dfs-chunk{s}:{CHUNK_SERVER_PORTS[s]}" for s in serverIds 
+                    if self.serverInfo[s].alive == True
+                ]
+                locations.append(master_pb2.ChunkLocation(chunk_handle = chunkHandle, 
+                                                          chunk_index = idx,
+                                                          server_addresses = aliveAddresses))
+            return master_pb2.DownloadFileResponse(success = True, locations = locations)
+        
+    def DeleteFile(self, 
+                   request: master_pb2.DeleteFileRequest, context) -> master_pb2.DeleteFileResponse:
+        with self.lock:
+            if request.filename.startswith("._deleted_"):
+                context.set_code(grpc.StatusCode.NOT_FOUND)
+                context.set_details("File is already deleted")
+                return master_pb2.DeleteFileResponse(success = False, 
+                                                       message = "File is already deleted")
+            
+            if request.filename not in self.namespace:
+                context.set_code(grpc.StatusCode.NOT_FOUND)
+                context.set_details("File not found in current namespace")
+                return master_pb2.DeleteFileResponse(success = False, 
+                                                     message = "File not found in current namespace")
+            hiddenName = f"._deleted_{time.time()}_{request.filename}"
+            self.namespace[hiddenName] = self.namespace.pop(request.filename)
+            self.fileToChunks[hiddenName] = self.fileToChunks.pop(request.filename)
+
+            self.deletedFiles[hiddenName] = time.time()
+            return master_pb2.DeleteFileResponse(success = True, message = "File marked for deletion")
+    
+    def ListFiles(self, request: master_pb2.ListFilesRequest, context) -> master_pb2.ListFilesResponse:
+        with self.lock:
+            return master_pb2.ListFilesResponse(files = list(
+                map(
+                    lambda item: master_pb2.FileInfo(
+                        filename = item[0],
+                        file_size = item[1].filesize,
+                        num_chunks = item[1].num_chunks
+                        ),
+                        filter(
+                            lambda item: not item[0].startswith("._deleted_"),
+                            self.namespace.items()
+                            )
+                    )
+                )
+            )
+    
+    def SearchFiles(self, 
+                    request: master_pb2.SearchFilesRequest, context) -> master_pb2.SearchFilesResponse:
+        return super().SearchFiles(request, context)
+    
+    def Heartbeat(self, 
+                  request: heartbeat_pb2.HeartbeatRequest, context) -> heartbeat_pb2.HeartbeatResponse:
+        with self.lock:
+            serverId = request.server_id
+            if serverId not in self.serverInfo:
+                self.serverInfo[serverId] = ServerInfo(serverId=serverId, availableDisk=request.available_disk)
+            
+            server = self.serverInfo[serverId]
+            server.availableDisk = request.available_disk
+            server.lastHeartbeat = time.time()
+            server.alive = True
+            server.chunkHandles = set(request.chunk_handles)
+
+            for chunkHandle in request.chunk_handles:
+                if chunkHandle in self.chunkToServers:
+                    self.chunkToServers[chunkHandle].add(serverId)
+
+            return heartbeat_pb2.HeartbeatResponse(success = True)
+    
+    def _healthCheck(self):
+        while True:
+            time.sleep(HEARTBEAT_INTERVAL)
+            with self.lock:
+                now = time.time()
+                timeout = HEARTBEAT_INTERVAL * HEARTBEAT_MISS_LIMIT
+                for (serverId, server) in self.serverInfo.items():
+                    if server.alive and (now - server.lastHeartbeat) > timeout:
+                        server.alive = False
+                        print(f"Server {serverId} marked as dead")
+
+                        for chunkHandle in server.chunkHandles:
+                            if chunkHandle in self.chunkToServers:
+                                self.chunkToServers[chunkHandle].discard(serverId)
+                                aliveReplicas = len(self.chunkToServers[chunkHandle])
+                                if aliveReplicas < REPLICATION_FACTOR:
+                                    print(f"Chunk {chunkHandle} Scheduled for re-replication")
+                                    print(f"Chunk {chunkHandle} under-replicated: {aliveReplicas} replicas")
+                                    #schedule re-replication
+
+    def _garbageCollect(self):
+        while True:
+            time.sleep(GC_INTERVAL)
+            with self.lock:
+                now = time.time()
+                toRemove = []
+
+                for hiddenName, deletionTime in self.deletedFiles.items():
+                    if (now - deletionTime) > GC_THRESHOLD:
+                        toRemove.append(hiddenName)
+                
+                for hiddenName in toRemove:
+                    chunkHandles = self.fileToChunks.pop(hiddenName, [])
+                    for chunkHandle in chunkHandles:
+                        self.chunkToServers.pop(chunkHandle, None)
+
+                    self.namespace.pop(hiddenName, None)
+                    del self.deletedFiles[hiddenName]
+
+                    print(f"Garbage collected: {hiddenName}")
+
+def serve():
+    server = grpc.server(ThreadPoolExecutor(max_workers= 10))
+    master = MasterServer()
+    master_pb2_grpc.add_MasterServiceServicer_to_server(master, server)
+    heartbeat_pb2_grpc.add_HeartbeatServiceServicer_to_server(master, server)
+
+    server.add_insecure_port(f"0.0.0.0:{MASTER_PORT}")
+    server.start()
+    print(f"Master server started on port {MASTER_PORT}")
+    server.wait_for_termination()
+
+if __name__ == "__main__":
+    serve()
