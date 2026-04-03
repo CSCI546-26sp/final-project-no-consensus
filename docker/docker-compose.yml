@@ -5,6 +5,8 @@ services:
       dockerfile: docker/Dockerfile
     container_name: dfs-master
     command: python -m master.server
+    environment:
+      - PYTHONUNBUFFERED=1
     ports:
       - "5050:5050"
     networks:
