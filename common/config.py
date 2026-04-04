@@ -23,3 +23,7 @@ HEARTBEAT_MISS_LIMIT = 3    # missed heartbeats before marking dead
 GC_INTERVAL = 60
 GC_THRESHOLD = 600
 
+STOP_WORDS = {"the", "a", "an", "is", "are", "was", "were", "in", "on",
+                "at", "to", "for", "of", "and", "or", "but", "not", "with",
+                "this", "that", "it", "be", "as", "by", "from", "has", "had",
+                "have", "will", "would", "could", "should", "may", "can"}
