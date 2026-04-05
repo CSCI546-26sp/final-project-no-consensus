@@ -13,7 +13,9 @@ from common.config import HEARTBEAT_INTERVAL, MASTER_HOST, MASTER_PORT
 from proto.chunkserver_pb2_grpc import ChunkServerServiceServicer, add_ChunkServerServiceServicer_to_server
 from proto.heartbeat_pb2_grpc import HeartbeatServiceServicer, HeartbeatServiceStub, add_HeartbeatServiceServicer_to_server
 from proto.heartbeat_pb2 import HeartbeatRequest, SearchChunksResponse, SearchChunksRequest, ChunkMatch
+from proto.heartbeat_pb2 import ReplicateChunkRequest, ReplicateChunkResponse
 from proto.chunkserver_pb2 import WriteChunkResponse, WriteChunkRequest, ReadChunkRequest, ReadChunkResponse
+from proto.chunkserver_pb2_grpc import ChunkServerServiceStub
 
 
 class ChunkServer(ChunkServerServiceServicer, HeartbeatServiceServicer):
@@ -112,6 +114,24 @@ class ChunkServer(ChunkServerServiceServicer, HeartbeatServiceServicer):
                 snippet = lineText
                 ))
         return SearchChunksResponse(matches = matches)
+    
+    def ReplicateChunk(self, 
+                       request: ReplicateChunkRequest, 
+                       context: grpc.ServicerContext) -> ReplicateChunkResponse:
+        try:
+            channel = grpc.insecure_channel(request.source_address)
+            stub = ChunkServerServiceStub(channel)
+            data = bytearray()
+            for response in stub.ReadChunk(ReadChunkRequest(chunk_handle = request.chunk_handle)):
+                data.extend(response.data)
+            data = bytes(data)
+
+            with self.lock:
+                self.store.writeChunk(chunkHandle = request.chunk_handle, data = data)
+                self.index.indexChunk(chunkHandle = request.chunk_handle, text = data.decode("utf-8"))
+            return ReplicateChunkResponse(success = True, message = "Chunk Replicated")
+        except grpc.RpcError as rpcError:
+            return ReplicateChunkResponse(success = False, message = rpcError.details())
 
 def serve():
     parser = argparse.ArgumentParser()
