@@ -1,3 +1,4 @@
+from collections import deque
 from typing import Iterator
 import argparse
 from concurrent.futures import ThreadPoolExecutor
@@ -68,7 +69,7 @@ class ChunkServer(ChunkServerServiceServicer, HeartbeatServiceServicer):
         for request in request_iterator:
             if chunkHandle is None:
                 chunkHandle = request.chunk_handle
-                forwardAddresses = list(request.forward_addresses)
+                forwardAddresses = deque(request.forward_addresses)
             data.extend(request.data)
         data = bytes(data)
 
@@ -76,7 +77,25 @@ class ChunkServer(ChunkServerServiceServicer, HeartbeatServiceServicer):
             self.store.writeChunk(chunkHandle = chunkHandle, data = data)
             self.index.indexChunk(chunkHandle = chunkHandle, text = data.decode("utf-8"))
 
-        #TODO: forward to replicas
+        if len(forwardAddresses):
+            nextAddress = forwardAddresses.popleft()
+            try:
+                channel = grpc.insecure_channel(nextAddress)
+                stub = ChunkServerServiceStub(channel)
+                STREAM_SIZE = 512 * 1024
+                def forwardIterator():
+                    for i in range(0, len(data), STREAM_SIZE):
+                        yield WriteChunkRequest(
+                            chunk_handle = chunkHandle,
+                            data = data[i: i+STREAM_SIZE],
+                            forward_addresses = forwardAddresses
+                        )
+                response = stub.WriteChunk(forwardIterator())
+                if not response.success:
+                    return WriteChunkResponse(success = False, message = f"Replica Forwarding failed")
+                
+            except grpc.RpcError as rpcError:
+                return WriteChunkResponse(success = False, message = f"Failed to open connection to replication servers: {rpcError.details()}")            
 
         return WriteChunkResponse(success = True, message = "Chunk Written")
     
