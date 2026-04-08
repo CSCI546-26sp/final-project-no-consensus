@@ -9,7 +9,8 @@ from concurrent.futures import ThreadPoolExecutor
 from common.config import CHUNK_SERVER_PORTS, CHUNK_SIZE, MASTER_PORT, REPLICATION_FACTOR, HEARTBEAT_INTERVAL, HEARTBEAT_MISS_LIMIT
 from common.config import GC_INTERVAL, GC_THRESHOLD
 from proto.master_pb2_grpc import MasterServiceServicer
-from proto.heartbeat_pb2_grpc import HeartbeatServiceServicer
+from proto.heartbeat_pb2 import ChunkMatch
+from proto.heartbeat_pb2_grpc import HeartbeatServiceServicer, HeartbeatServiceStub
 from proto import master_pb2, heartbeat_pb2, master_pb2_grpc, heartbeat_pb2_grpc
 
 class FileMetaData:
@@ -50,7 +51,8 @@ class MasterServer(MasterServiceServicer, HeartbeatServiceServicer):
         serverList = sorted([server for server in self.serverInfo.values() if server.alive], 
                             key = lambda server: server.availableDisk , 
                             reverse = True)
-        
+        if len(serverList) < replicationFactor:
+            print(f"Warning: Only {len(serverList)} servers alive; requested {replicationFactor}")
         return serverList[0:replicationFactor]
     
     def UploadFile(self, 
@@ -153,7 +155,63 @@ class MasterServer(MasterServiceServicer, HeartbeatServiceServicer):
     
     def SearchFiles(self, 
                     request: master_pb2.SearchFilesRequest, context) -> master_pb2.SearchFilesResponse:
-        return super().SearchFiles(request, context)
+        with self.lock:
+            addressesOfServersThatAreAliveAndDoingWell = [
+                        f"dfs-chunk{s.serverId}:{CHUNK_SERVER_PORTS[s.serverId]}" for s in self.serverInfo.values() 
+                        if s.alive == True
+                    ]
+        
+        allMatches: list[ChunkMatch] = []
+        with ThreadPoolExecutor() as commanderExecutor:
+            futures = [
+                commanderExecutor.submit(self._fanOut, serverAddress, request)
+                for serverAddress in addressesOfServersThatAreAliveAndDoingWell
+            ]
+
+            for result in futures:
+                allMatches.extend(result.result())
+
+        with self.lock:
+            chunkToFile = {}
+            for filename, chunkHandles in self.fileToChunks.items():
+                if filename.startswith("._deleted_"):
+                    continue
+                for chunkHandle in chunkHandles:
+                    chunkToFile[chunkHandle] = filename
+
+        fileScores = {}
+        for match in allMatches:
+            filename = chunkToFile.get(match.chunk_handle)
+            if filename is None:
+                continue
+
+            if filename not in fileScores:
+                fileScores[filename] = [0, match.line_number, match.snippet, match.score]
+            fileScores[filename][0] += match.score
+
+            if match.score > fileScores[filename][3]:
+                fileScores[filename][1] = match.line_number
+                fileScores[filename][2] = match.snippet
+                fileScores[filename][3] = match.score
+
+        sortedResults = sorted(fileScores.items(), key = lambda x: x[1][0], reverse = True)
+        return master_pb2.SearchFilesResponse(results = [
+            master_pb2.SearchResult(filename=filename, 
+                                    score=score, 
+                                    line_number=lineNumber, 
+                                    snippet=snippet) 
+                for (filename, [score, lineNumber, snippet, _]) in sortedResults
+            ])
+
+
+    def _fanOut(self, serverAddress: str, request: master_pb2.SearchFilesRequest):
+        try:
+            channel = grpc.insecure_channel(serverAddress)
+            stub = HeartbeatServiceStub(channel)
+            response = stub.SearchChunks(heartbeat_pb2.SearchChunksRequest(query=request.query))
+            return response.matches
+        except grpc.RpcError as e:
+            return []
     
     def Heartbeat(self, 
                   request: heartbeat_pb2.HeartbeatRequest, context) -> heartbeat_pb2.HeartbeatResponse:
