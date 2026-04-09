@@ -47,8 +47,9 @@ class MasterServer(MasterServiceServicer, HeartbeatServiceServicer):
         threading.Thread(target=self._garbageCollect, daemon=True).start()
         return
     
-    def selectServers(self, replicationFactor:int) -> list[ServerInfo]:
-        serverList = sorted([server for server in self.serverInfo.values() if server.alive], 
+    def selectServers(self, replicationFactor:int, exceptions: set[int] = None) -> list[ServerInfo]:
+        serverList = sorted([server for server in self.serverInfo.values() 
+                             if server.alive and (not exceptions or server.serverId not in exceptions)], 
                             key = lambda server: server.availableDisk , 
                             reverse = True)
         if len(serverList) < replicationFactor:
@@ -235,6 +236,8 @@ class MasterServer(MasterServiceServicer, HeartbeatServiceServicer):
     def _healthCheck(self):
         while True:
             time.sleep(HEARTBEAT_INTERVAL)
+            replicationTasks = []
+
             with self.lock:
                 now = time.time()
                 timeout = HEARTBEAT_INTERVAL * HEARTBEAT_MISS_LIMIT
@@ -242,15 +245,37 @@ class MasterServer(MasterServiceServicer, HeartbeatServiceServicer):
                     if server.alive and (now - server.lastHeartbeat) > timeout:
                         server.alive = False
                         print(f"Server {serverId} marked as dead")
-
+                        
                         for chunkHandle in server.chunkHandles:
                             if chunkHandle in self.chunkToServers:
                                 self.chunkToServers[chunkHandle].discard(serverId)
                                 aliveReplicas = len(self.chunkToServers[chunkHandle])
-                                if aliveReplicas < REPLICATION_FACTOR:
-                                    print(f"Chunk {chunkHandle} Scheduled for re-replication")
-                                    print(f"Chunk {chunkHandle} under-replicated: {aliveReplicas} replicas")
-                                    #schedule re-replication
+                                
+                                if 0 < aliveReplicas < REPLICATION_FACTOR:    
+                                    sourceId = next(iter(self.chunkToServers[chunkHandle]))
+                                    candidates = self.selectServers(
+                                        1, 
+                                        self.chunkToServers[chunkHandle])
+                                    
+                                    if candidates:
+                                        targetId = candidates[0].serverId
+                                        replicationTasks.append((chunkHandle, sourceId, targetId))
+            
+            for (chunkHandle, sourceId, targetId) in replicationTasks:
+                sourceAddress = f"dfs-chunk{sourceId}:{CHUNK_SERVER_PORTS[sourceId]}"
+                targetAddress = f"dfs-chunk{targetId}:{CHUNK_SERVER_PORTS[targetId]}"
+                try:
+                    channel = grpc.insecure_channel(targetAddress)
+                    stub = HeartbeatServiceStub(channel)
+                    stub.ReplicateChunk(heartbeat_pb2.ReplicateChunkRequest(
+                        chunk_handle = chunkHandle, 
+                        source_address = sourceAddress))
+                    with self.lock:
+                        self.chunkToServers[chunkHandle].add(targetId)
+                    print(f"Chunk {chunkHandle} replicated to server {targetId}")
+                except grpc.RpcError as error: 
+                    print(f"Error while re-replicating {error.details()}")
+
 
     def _garbageCollect(self):
         while True:
