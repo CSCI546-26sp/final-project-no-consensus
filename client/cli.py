@@ -73,5 +73,41 @@ def upload(filepath, name):
 
     return
 
+@cli.command()
+@click.argument("filename")
+@click.option("--output", default = None, help = "local path to save the file; defaults to filename")
+def download(filename, output):
+    if output is None:
+        output = filename
+    channel = grpc.insecure_channel(MASTER_ADDRESS)
+    masterStub = MasterServiceStub(channel)
+
+    try:
+        response = masterStub.DownloadFile(
+            master_pb2.DownloadFileRequest(filename = filename)
+        )
+    except grpc.RpcError as e:
+        click.echo(f"Error: {e.details()}")
+
+    locations = sorted(response.locations, key = lambda x: x.chunk_index)
+    fileData = bytearray()
+
+    for location in locations:
+        address = translateAddress(location.server_addresses[0])
+        chunkChannel = grpc.insecure_channel(address)
+        chunkStub = chunkserver_pb2_grpc.ChunkServerServiceStub(chunkChannel)
+        try:
+            for readResponse in chunkStub.ReadChunk(
+                chunkserver_pb2.ReadChunkRequest(chunk_handle = location.chunk_handle)
+            ):
+                fileData.extend(readResponse.data)
+        except grpc.RpcError as e:
+            click.echo(f"Error reading chunk {location.chunk_index}: {e.details()}")
+    
+    with open(output, "wb") as f:
+        f.write(fileData)
+    
+    click.echo(f"Downloaded '{filename} ({len(fileData)}) bytes from {len(locations)} chunks; saved to {output}")
+
 if __name__ == "__main__":
     cli()
