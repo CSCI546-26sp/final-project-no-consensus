@@ -1,7 +1,6 @@
 import click
 import grpc
 import os
-import math
 
 from common.config import CHUNK_SIZE
 from proto import master_pb2, master_pb2_grpc, chunkserver_pb2, chunkserver_pb2_grpc
@@ -88,6 +87,7 @@ def download(filename, output):
         )
     except grpc.RpcError as e:
         click.echo(f"Error: {e.details()}")
+        return
 
     locations = sorted(response.locations, key = lambda x: x.chunk_index)
     fileData = bytearray()
@@ -103,11 +103,44 @@ def download(filename, output):
                 fileData.extend(readResponse.data)
         except grpc.RpcError as e:
             click.echo(f"Error reading chunk {location.chunk_index}: {e.details()}")
+            return
     
     with open(output, "wb") as f:
         f.write(fileData)
     
-    click.echo(f"Downloaded '{filename} ({len(fileData)}) bytes from {len(locations)} chunks; saved to {output}")
+    click.echo(f"Downloaded '{filename}' ({len(fileData)} bytes, {len(locations)} chunks) -> {output}")
+
+@cli.command()
+def list():
+    channel = grpc.insecure_channel(MASTER_ADDRESS)
+    stub = MasterServiceStub(channel)
+
+    try:
+        response = stub.ListFiles(master_pb2.ListFilesRequest())
+    except grpc.RpcError as e:
+        click.echo(f"Error while listing files: {e.details()}")
+        return
+    
+    if not response.files:
+        click.echo("No files found")
+        return
+    click.echo(f"{'Filename':<40} {'Size':>12} {'Chunks':>8}")
+    click.echo("-"*62)
+
+    for f in response.files:
+        click.echo(f"{f.filename:<40} {f.file_size:>12} {f.num_chunks:>8}")
+
+@cli.command()
+@click.argument("filename")
+def delete(filename):
+    channel = grpc.insecure_channel(MASTER_ADDRESS)
+    stub = MasterServiceStub(channel)
+    try:
+        response = stub.DeleteFile(master_pb2.DeleteFileRequest(filename = filename))
+        click.echo(f"Deleted: {filename}")
+    except grpc.RpcError as e:
+        click.echo(f"Error while deleting files: {e.details()}")
+        return
 
 if __name__ == "__main__":
     cli()
