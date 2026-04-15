@@ -26,7 +26,7 @@ class ChunkStore:
         return
     
     def listChunks(self):
-        return os.listdir(self.dataDir)
+        return [f for f in os.listdir(self.dataDir) if os.path.isfile(os.path.join(self.dataDir, f))]
     
     def getAvailableDisk(self):
         return shutil.disk_usage(self.dataDir).free

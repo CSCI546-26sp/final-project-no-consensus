@@ -48,7 +48,7 @@ def upload(filepath, name):
         chunkEnd = min(chunkStart + CHUNK_SIZE, len(dataBytes))
         chunkData = dataBytes[ chunkStart: chunkEnd]
 
-        addresses = list(assignment.server_addresses)
+        addresses = assignment.server_addresses[:]
         primaryAddress = translateAddress(addresses[0])
         forwardAddresses = addresses[1:]
 
@@ -110,8 +110,8 @@ def download(filename, output):
     
     click.echo(f"Downloaded '{filename}' ({len(fileData)} bytes, {len(locations)} chunks) -> {output}")
 
-@cli.command()
-def list():
+@cli.command("list")
+def listFiles():
     channel = grpc.insecure_channel(MASTER_ADDRESS)
     stub = MasterServiceStub(channel)
 
@@ -141,6 +141,26 @@ def delete(filename):
     except grpc.RpcError as e:
         click.echo(f"Error while deleting files: {e.details()}")
         return
+    
+@cli.command()
+@click.argument("query")
+def search(query):
+    channel = grpc.insecure_channel(MASTER_ADDRESS)
+    stub = MasterServiceStub(channel)
+    try:
+        response = stub.SearchFiles(master_pb2.SearchFilesRequest(query = query))
+    except grpc.RpcError as e:
+        click.echo(f"Error while searching: {e.details()}")
+        return
+    
+    if not response.results:
+        click.echo("No results found")
+        return
+
+    click.echo(f"{'Filename':<40} {'Score':>8} {'Line':>6}  Snippet")
+    click.echo("-" * 80)
+    for r in response.results:
+        click.echo(f"{r.filename:<40} {r.score:>8.2f} {r.line_number:>6} {r.snippet}")
 
 if __name__ == "__main__":
     cli()

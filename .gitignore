@@ -7,6 +7,7 @@ data/
 *.egg-info/
 dist/
 build/
+.vscode/
 
 # Generated gRPC/protobuf files
 *_pb2.py

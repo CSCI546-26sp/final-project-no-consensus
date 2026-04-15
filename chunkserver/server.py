@@ -158,7 +158,7 @@ def serve():
     parser.add_argument("--port", type = int, required = True)
     args = parser.parse_args()
 
-    dataDir = f"/data/chunk{args.id}"
+    dataDir = f"/app/data"
     chunkServer = ChunkServer(serverId = args.id, port = args.port, dataDir = dataDir)
 
     server = grpc.server(ThreadPoolExecutor(max_workers = 10))
