@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Distributed File System</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            surface: {
+              900: '#0f1117',
+              800: '#161822',
+              700: '#1e2030',
+              600: '#272a3d',
+            },
+            accent: {
+              DEFAULT: '#6366f1',
+              light: '#818cf8',
+              dark: '#4f46e5',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { font-family: 'Inter', system-ui, -apple-system, sans-serif; }
+    .drop-active { border-color: #6366f1 !important; background: rgba(99,102,241,0.08) !important; }
+    .toast-enter { animation: slideIn 0.3s ease-out; }
+    .toast-exit { animation: slideOut 0.3s ease-in forwards; }
+    @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    @keyframes slideOut { from { transform: translateX(0); opacity: 1; } to { transform: translateX(100%); opacity: 0; } }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner { animation: spin 0.7s linear infinite; }
+  </style>
+</head>
+<body class="dark h-full bg-surface-900 text-gray-200 antialiased">
+
+  <!-- Toast container -->
+  <div id="toastContainer" class="fixed top-5 right-5 z-50 flex flex-col gap-3 max-w-sm"></div>
+
+  <!-- Header -->
+  <header class="bg-surface-800 border-b border-surface-600 shadow-lg">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 py-5">
+      <h1 class="text-2xl sm:text-3xl font-bold text-white tracking-tight">Distributed File System</h1>
+      <p class="text-sm text-gray-400 mt-1">Upload, download, search, and manage files across a distributed cluster</p>
+    </div>
+  </header>
+
+  <main class="max-w-6xl mx-auto px-4 sm:px-6 py-8 space-y-8">
+
+    <!-- Upload section -->
+    <section class="bg-surface-800 rounded-xl border border-surface-600 p-6">
+      <h2 class="text-lg font-semibold text-white mb-4">Upload File</h2>
+      <div class="flex flex-col sm:flex-row gap-4">
+        <div class="flex-1">
+          <div id="dropZone"
+               class="border-2 border-dashed border-surface-600 rounded-lg p-8 text-center cursor-pointer transition-colors hover:border-accent/50">
+            <svg class="mx-auto h-10 w-10 text-gray-500 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-8m0 0l-3 3m3-3l3 3M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2"/>
+            </svg>
+            <p class="text-gray-400 text-sm">Drag & drop a file here, or <span class="text-accent-light underline">browse</span></p>
+            <input type="file" id="fileInput" class="hidden" />
+            <p id="selectedFile" class="text-xs text-gray-500 mt-2 hidden"></p>
+          </div>
+        </div>
+        <div class="sm:w-64 flex flex-col gap-3">
+          <div>
+            <label class="block text-xs text-gray-400 mb-1">Custom name (optional)</label>
+            <input type="text" id="uploadName" placeholder="my-file.txt"
+                   class="w-full bg-surface-700 border border-surface-600 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent" />
+          </div>
+          <button id="uploadBtn" disabled
+                  class="bg-accent hover:bg-accent-dark disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium text-sm rounded-lg px-4 py-2.5 transition-colors flex items-center justify-center gap-2">
+            <span id="uploadBtnText">Upload</span>
+            <svg id="uploadSpinner" class="hidden spinner h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- File list section -->
+    <section class="bg-surface-800 rounded-xl border border-surface-600 p-6">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-semibold text-white">Files</h2>
+        <button onclick="loadFiles()" class="text-xs text-accent-light hover:text-white transition-colors">Refresh</button>
+      </div>
+      <div id="filesLoading" class="text-center py-6 text-gray-500 text-sm hidden">
+        <svg class="inline spinner h-5 w-5 mr-2 text-accent" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+        </svg>
+        Loading files...
+      </div>
+      <div id="filesEmpty" class="text-center py-6 text-gray-500 text-sm hidden">No files stored yet.</div>
+      <div class="overflow-x-auto">
+        <table id="filesTable" class="w-full text-sm hidden">
+          <thead>
+            <tr class="text-left text-xs text-gray-400 uppercase tracking-wider border-b border-surface-600">
+              <th class="pb-3 pr-4">Filename</th>
+              <th class="pb-3 pr-4 text-right">Size</th>
+              <th class="pb-3 pr-4 text-right">Chunks</th>
+              <th class="pb-3 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="filesBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Search section -->
+    <section class="bg-surface-800 rounded-xl border border-surface-600 p-6">
+      <h2 class="text-lg font-semibold text-white mb-4">Search</h2>
+      <div class="flex gap-3">
+        <input type="text" id="searchInput" placeholder="Enter search query..."
+               class="flex-1 bg-surface-700 border border-surface-600 rounded-lg px-4 py-2.5 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent" />
+        <button id="searchBtn"
+                class="bg-accent hover:bg-accent-dark text-white font-medium text-sm rounded-lg px-5 py-2.5 transition-colors flex items-center gap-2">
+          <span id="searchBtnText">Search</span>
+          <svg id="searchSpinner" class="hidden spinner h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+          </svg>
+        </button>
+      </div>
+      <div id="searchResults" class="mt-4 hidden">
+        <div id="searchEmpty" class="text-center py-4 text-gray-500 text-sm hidden">No results found.</div>
+        <div class="overflow-x-auto">
+          <table id="searchTable" class="w-full text-sm hidden">
+            <thead>
+              <tr class="text-left text-xs text-gray-400 uppercase tracking-wider border-b border-surface-600">
+                <th class="pb-3 pr-4">Filename</th>
+                <th class="pb-3 pr-4 text-right">Score</th>
+                <th class="pb-3 pr-4 text-right">Line</th>
+                <th class="pb-3">Snippet</th>
+              </tr>
+            </thead>
+            <tbody id="searchBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="text-center text-xs text-gray-600 py-6">CSCI 546 &mdash; Distributed Systems</footer>
+
+<script>
+// Toast notifications
+function showToast(message, type) {
+  var container = document.getElementById('toastContainer');
+  var colors = {
+    success: 'bg-emerald-600/90 border-emerald-500',
+    error: 'bg-red-600/90 border-red-500',
+    info: 'bg-indigo-600/90 border-indigo-500'
+  };
+  var toast = document.createElement('div');
+  toast.className = 'toast-enter border-l-4 rounded-lg px-4 py-3 text-sm text-white shadow-xl backdrop-blur ' + (colors[type] || colors.info);
+  toast.textContent = message;
+  container.appendChild(toast);
+  setTimeout(function() {
+    toast.classList.remove('toast-enter');
+    toast.classList.add('toast-exit');
+    setTimeout(function() { toast.remove(); }, 300);
+  }, 4000);
+}
+
+// File list
+function loadFiles() {
+  var loading = document.getElementById('filesLoading');
+  var empty = document.getElementById('filesEmpty');
+  var table = document.getElementById('filesTable');
+  var body = document.getElementById('filesBody');
+
+  loading.classList.remove('hidden');
+  empty.classList.add('hidden');
+  table.classList.add('hidden');
+
+  fetch('/api/files')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      loading.classList.add('hidden');
+      if (data.error) {
+        showToast(data.error, 'error');
+        empty.textContent = 'Could not load files.';
+        empty.classList.remove('hidden');
+        return;
+      }
+      if (data.length === 0) {
+        empty.textContent = 'No files stored yet.';
+        empty.classList.remove('hidden');
+        return;
+      }
+      body.innerHTML = '';
+      data.forEach(function(f) {
+        var tr = document.createElement('tr');
+        tr.className = 'border-b border-surface-700 hover:bg-surface-700/50 transition-colors';
+        tr.innerHTML =
+          '<td class="py-3 pr-4 font-medium text-gray-200 break-all">' + escapeHtml(f.filename) + '</td>' +
+          '<td class="py-3 pr-4 text-right text-gray-400 whitespace-nowrap">' + escapeHtml(f.file_size_human) + '</td>' +
+          '<td class="py-3 pr-4 text-right text-gray-400">' + f.num_chunks + '</td>' +
+          '<td class="py-3 text-right whitespace-nowrap">' +
+            '<button onclick="downloadFile(\'' + escapeAttr(f.filename) + '\')" class="text-accent-light hover:text-white text-xs mr-3 transition-colors">Download</button>' +
+            '<button onclick="deleteFile(\'' + escapeAttr(f.filename) + '\')" class="text-red-400 hover:text-red-300 text-xs transition-colors">Delete</button>' +
+          '</td>';
+        body.appendChild(tr);
+      });
+      table.classList.remove('hidden');
+    })
+    .catch(function(err) {
+      loading.classList.add('hidden');
+      showToast('Failed to load files: ' + err.message, 'error');
+    });
+}
+
+function downloadFile(filename) {
+  window.location.href = '/api/download/' + encodeURIComponent(filename);
+}
+
+function deleteFile(filename) {
+  if (!confirm('Delete "' + filename + '"?')) return;
+  fetch('/api/files/' + encodeURIComponent(filename), { method: 'DELETE' })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.error) { showToast(data.error, 'error'); return; }
+      showToast(data.message, 'success');
+      loadFiles();
+    })
+    .catch(function(err) { showToast('Delete failed: ' + err.message, 'error'); });
+}
+
+// Upload
+var dropZone = document.getElementById('dropZone');
+var fileInput = document.getElementById('fileInput');
+var selectedFileEl = document.getElementById('selectedFile');
+var uploadBtn = document.getElementById('uploadBtn');
+var uploadBtnText = document.getElementById('uploadBtnText');
+var uploadSpinner = document.getElementById('uploadSpinner');
+var chosenFile = null;
+
+dropZone.addEventListener('click', function() { fileInput.click(); });
+dropZone.addEventListener('dragover', function(e) { e.preventDefault(); dropZone.classList.add('drop-active'); });
+dropZone.addEventListener('dragleave', function() { dropZone.classList.remove('drop-active'); });
+dropZone.addEventListener('drop', function(e) {
+  e.preventDefault();
+  dropZone.classList.remove('drop-active');
+  if (e.dataTransfer.files.length > 0) { selectFile(e.dataTransfer.files[0]); }
+});
+fileInput.addEventListener('change', function() {
+  if (fileInput.files.length > 0) { selectFile(fileInput.files[0]); }
+});
+
+function selectFile(file) {
+  chosenFile = file;
+  selectedFileEl.textContent = file.name + ' (' + humanSize(file.size) + ')';
+  selectedFileEl.classList.remove('hidden');
+  uploadBtn.disabled = false;
+}
+
+function humanSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024*1024) return (bytes/1024).toFixed(1) + ' KB';
+  if (bytes < 1024*1024*1024) return (bytes/(1024*1024)).toFixed(1) + ' MB';
+  return (bytes/(1024*1024*1024)).toFixed(2) + ' GB';
+}
+
+uploadBtn.addEventListener('click', function() {
+  if (!chosenFile) return;
+  var fd = new FormData();
+  fd.append('file', chosenFile);
+  var customName = document.getElementById('uploadName').value.trim();
+  if (customName) fd.append('name', customName);
+
+  uploadBtn.disabled = true;
+  uploadBtnText.textContent = 'Uploading...';
+  uploadSpinner.classList.remove('hidden');
+
+  fetch('/api/upload', { method: 'POST', body: fd })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      uploadBtn.disabled = false;
+      uploadBtnText.textContent = 'Upload';
+      uploadSpinner.classList.add('hidden');
+      if (data.error) { showToast(data.error, 'error'); return; }
+      showToast(data.message, 'success');
+      chosenFile = null;
+      fileInput.value = '';
+      selectedFileEl.classList.add('hidden');
+      document.getElementById('uploadName').value = '';
+      uploadBtn.disabled = true;
+      loadFiles();
+    })
+    .catch(function(err) {
+      uploadBtn.disabled = false;
+      uploadBtnText.textContent = 'Upload';
+      uploadSpinner.classList.add('hidden');
+      showToast('Upload failed: ' + err.message, 'error');
+    });
+});
+
+// Search
+var searchInput = document.getElementById('searchInput');
+var searchBtn = document.getElementById('searchBtn');
+var searchBtnText = document.getElementById('searchBtnText');
+var searchSpinner = document.getElementById('searchSpinner');
+
+function doSearch() {
+  var query = searchInput.value.trim();
+  if (!query) return;
+
+  var resultsSection = document.getElementById('searchResults');
+  var emptyEl = document.getElementById('searchEmpty');
+  var tableEl = document.getElementById('searchTable');
+  var bodyEl = document.getElementById('searchBody');
+
+  resultsSection.classList.remove('hidden');
+  emptyEl.classList.add('hidden');
+  tableEl.classList.add('hidden');
+  searchBtn.disabled = true;
+  searchBtnText.textContent = 'Searching...';
+  searchSpinner.classList.remove('hidden');
+
+  fetch('/api/search?q=' + encodeURIComponent(query))
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      searchBtn.disabled = false;
+      searchBtnText.textContent = 'Search';
+      searchSpinner.classList.add('hidden');
+      if (data.error) { showToast(data.error, 'error'); return; }
+      if (data.length === 0) {
+        emptyEl.classList.remove('hidden');
+        return;
+      }
+      bodyEl.innerHTML = '';
+      data.forEach(function(r) {
+        var tr = document.createElement('tr');
+        tr.className = 'border-b border-surface-700 hover:bg-surface-700/50 transition-colors';
+        tr.innerHTML =
+          '<td class="py-3 pr-4 font-medium text-gray-200 break-all">' + escapeHtml(r.filename) + '</td>' +
+          '<td class="py-3 pr-4 text-right text-gray-400">' + r.score.toFixed(4) + '</td>' +
+          '<td class="py-3 pr-4 text-right text-gray-400">' + r.line_number + '</td>' +
+          '<td class="py-3 text-gray-400 font-mono text-xs italic break-all">' + escapeHtml(r.snippet) + '</td>';
+        bodyEl.appendChild(tr);
+      });
+      tableEl.classList.remove('hidden');
+    })
+    .catch(function(err) {
+      searchBtn.disabled = false;
+      searchBtnText.textContent = 'Search';
+      searchSpinner.classList.add('hidden');
+      showToast('Search failed: ' + err.message, 'error');
+    });
+}
+
+searchBtn.addEventListener('click', doSearch);
+searchInput.addEventListener('keydown', function(e) { if (e.key === 'Enter') doSearch(); });
+
+// Helpers
+function escapeHtml(s) {
+  var d = document.createElement('div');
+  d.appendChild(document.createTextNode(s));
+  return d.innerHTML;
+}
+function escapeAttr(s) {
+  return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+// Init
+loadFiles();
+</script>
+</body>
+</html>
