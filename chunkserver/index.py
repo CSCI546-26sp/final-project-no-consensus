@@ -80,7 +80,8 @@ class InvertedIndex:
             postings = self.index.get(token, [])
             if not postings:
                 continue
-            idf = math.log(self.totalChunks / len(postings))
+            df = len(set(p.chunkHandle for p in postings))
+            idf = math.log(1 + self.totalChunks / df)
             for posting in postings:
                 tf = posting.frequency
                 score = tf * idf
