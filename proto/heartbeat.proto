@@ -13,6 +13,9 @@ service HeartbeatService {
 
   // Master forwards a search query to a chunk server
   rpc SearchChunks (SearchChunksRequest) returns (SearchChunksResponse);
+
+  //Master tells chunk server to scan a chunk for all lines matching a query
+  rpc ScanChunk (ScanChunkRequest) returns (ScanChunkResponse);
 }
 
 // --- Heartbeat ---
@@ -54,4 +57,20 @@ message ChunkMatch {
 
 message SearchChunksResponse {
   repeated ChunkMatch matches = 1;
+}
+
+// --- Scan (master -> chunk server, grep within a chunk) ---
+
+message ScanChunkRequest {
+  string chunk_handle = 1;
+  string query = 2;
+}
+
+message ScanMatch {
+  int32 line_number = 1;
+  string line_text = 2;
+}
+
+message ScanChunkResponse {
+  repeated ScanMatch matches = 1;
 }

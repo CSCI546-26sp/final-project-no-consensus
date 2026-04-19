@@ -5,18 +5,21 @@ from concurrent.futures import ThreadPoolExecutor
 import threading
 import grpc
 import time
+import re
 
 from chunkserver.index import InvertedIndex
 from chunkserver.store import ChunkStore
 
 from common.config import HEARTBEAT_INTERVAL, MASTER_HOST, MASTER_PORT
 
-from proto.chunkserver_pb2_grpc import ChunkServerServiceServicer, add_ChunkServerServiceServicer_to_server
+from proto.chunkserver_pb2_grpc import ChunkServerServiceServicer, add_ChunkServerServiceServicer_to_server, ChunkServerServiceStub
 from proto.heartbeat_pb2_grpc import HeartbeatServiceServicer, HeartbeatServiceStub, add_HeartbeatServiceServicer_to_server
+
 from proto.heartbeat_pb2 import HeartbeatRequest, SearchChunksResponse, SearchChunksRequest, ChunkMatch
 from proto.heartbeat_pb2 import ReplicateChunkRequest, ReplicateChunkResponse
+from proto.heartbeat_pb2 import ScanChunkRequest, ScanChunkResponse, ScanMatch
+
 from proto.chunkserver_pb2 import WriteChunkResponse, WriteChunkRequest, ReadChunkRequest, ReadChunkResponse
-from proto.chunkserver_pb2_grpc import ChunkServerServiceStub
 
 
 class ChunkServer(ChunkServerServiceServicer, HeartbeatServiceServicer):
@@ -151,6 +154,35 @@ class ChunkServer(ChunkServerServiceServicer, HeartbeatServiceServicer):
             return ReplicateChunkResponse(success = True, message = "Chunk Replicated")
         except grpc.RpcError as rpcError:
             return ReplicateChunkResponse(success = False, message = rpcError.details())
+        
+    def ScanChunk(self, 
+                  request: ScanChunkRequest, 
+                  context: grpc.ServicerContext) -> ScanChunkResponse:
+        chunkHandle = request.chunk_handle
+        query = request.query
+        if not query:
+            return ScanChunkResponse()
+
+        with self.lock:
+            if not self.store.chunkExists(chunkHandle = chunkHandle):
+                context.set_code(grpc.StatusCode.NOT_FOUND)
+                context.set_details("Chunk does not exist")
+                return ScanChunkResponse()
+            
+            data = self.store.readChunk(chunkHandle = chunkHandle)
+
+        text = data.decode("utf-8", errors = "replace")
+        pattern = re.compile(re.escape(query), re.IGNORECASE)
+
+        matches = []
+        for lineNumber, line in enumerate(text.splitlines()):
+            if pattern.search(line):
+                matches.append(ScanMatch(
+                    line_number = lineNumber,
+                    line_text = line,
+                ))
+        return ScanChunkResponse(matches = matches)
+        
 
 def serve():
     parser = argparse.ArgumentParser()

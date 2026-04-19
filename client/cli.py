@@ -162,5 +162,28 @@ def search(query):
     for r in response.results:
         click.echo(f"{r.filename:<40} {r.score:>8.2f} {r.line_number:>6} {r.snippet}")
 
+@cli.command()
+@click.argument("filename")
+@click.argument("query")
+def filesearch(filename, query):
+    channel = grpc.insecure_channel(MASTER_ADDRESS)
+    stub = MasterServiceStub(channel)
+    try:
+        response = stub.FileSearch(
+            master_pb2.FileSearchRequest(filename = filename, query = query)
+        )
+    except grpc.RpcError as e:
+        click.echo(f"Error: {e.details()}")
+        return
+
+    if not response.matches:
+        click.echo(f"No matches for '{query}' in '{filename}'")
+
+    click.echo(f"Matches for '{query}' in '{filename}' ({len(response.matches)} hits):")
+    click.echo(f"{'Chunk':>6} {'Line':>6}  Text")                                 
+    click.echo("-" * 80)                                                          
+    for m in response.matches:                                                    
+        click.echo(f"{m.chunk_index:>6} {m.line_number:>6}  {m.line_text}") 
+
 if __name__ == "__main__":
     cli()

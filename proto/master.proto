@@ -19,6 +19,9 @@ service MasterService {
 
   // Client sends a search query, master coordinates and returns results
   rpc SearchFiles (SearchFilesRequest) returns (SearchFilesResponse);
+
+  //Client searches within a specific file for all lines matching a query
+  rpc FileSearch (FileSearchRequest) returns (FileSearchResponse);
 }
 
 // --- Upload ---
@@ -99,4 +102,23 @@ message SearchResult {
 
 message SearchFilesResponse {
   repeated SearchResult results = 1;
+}
+
+// --- File Search (grep within a file) ---                                       
+                  
+message FileSearchRequest {
+  string filename = 1;
+  string query = 2;
+}                                                                                 
+
+message FileSearchMatch {                                                         
+  int32 chunk_index = 1;
+  int32 line_number = 2;
+  string line_text = 3;
+}
+
+message FileSearchResponse {                                                      
+  bool success = 1;
+  string message = 2;                                                             
+  repeated FileSearchMatch matches = 3;
 }

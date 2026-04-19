@@ -148,6 +148,43 @@
       </div>
     </section>
 
+    <!-- File Search section -->
+    <section class="bg-surface-800 rounded-xl border border-surface-600 p-6">
+      <h2 class="text-lg font-semibold text-white mb-1">File Search</h2>
+      <p class="text-xs text-gray-500 mb-4">Search within a specific file for all matching lines</p>
+      <div class="flex flex-col sm:flex-row gap-3">
+        <select id="fileSearchFilename"
+                class="sm:w-56 bg-surface-700 border border-surface-600 rounded-lg px-4 py-2.5 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent">
+          <option value="" disabled selected>Select a file...</option>
+        </select>
+        <input type="text" id="fileSearchQuery" placeholder="Search query..."
+               class="flex-1 bg-surface-700 border border-surface-600 rounded-lg px-4 py-2.5 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent" />
+        <button id="fileSearchBtn"
+                class="bg-accent hover:bg-accent-dark text-white font-medium text-sm rounded-lg px-5 py-2.5 transition-colors flex items-center gap-2">
+          <span id="fileSearchBtnText">Search</span>
+          <svg id="fileSearchSpinner" class="hidden spinner h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+          </svg>
+        </button>
+      </div>
+      <div id="fileSearchResults" class="mt-4 hidden">
+        <div id="fileSearchEmpty" class="text-center py-4 text-gray-500 text-sm hidden">No matches found.</div>
+        <p id="fileSearchCount" class="text-xs text-gray-400 mb-2 hidden"></p>
+        <div class="overflow-x-auto">
+          <table id="fileSearchTable" class="w-full text-sm hidden">
+            <thead>
+              <tr class="text-left text-xs text-gray-400 uppercase tracking-wider border-b border-surface-600">
+                <th class="pb-3 pr-4 text-right">Line #</th>
+                <th class="pb-3">Text</th>
+              </tr>
+            </thead>
+            <tbody id="fileSearchBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
   </main>
 
   <footer class="text-center text-xs text-gray-600 py-6">CSCI 546 &mdash; Distributed Systems</footer>
@@ -199,6 +236,16 @@ function loadFiles() {
         return;
       }
       body.innerHTML = '';
+      var fileSelect = document.getElementById('fileSearchFilename');
+      var prevSelected = fileSelect.value;
+      fileSelect.innerHTML = '<option value="" disabled selected>Select a file...</option>';
+      data.forEach(function(f) {
+        var opt = document.createElement('option');
+        opt.value = f.filename;
+        opt.textContent = f.filename;
+        if (f.filename === prevSelected) opt.selected = true;
+        fileSelect.appendChild(opt);
+      });
       data.forEach(function(f) {
         var tr = document.createElement('tr');
         tr.className = 'border-b border-surface-700 hover:bg-surface-700/50 transition-colors';
@@ -361,6 +408,71 @@ function doSearch() {
 
 searchBtn.addEventListener('click', doSearch);
 searchInput.addEventListener('keydown', function(e) { if (e.key === 'Enter') doSearch(); });
+
+// File Search
+var fileSearchFilename = document.getElementById('fileSearchFilename');
+var fileSearchQuery = document.getElementById('fileSearchQuery');
+var fileSearchBtn = document.getElementById('fileSearchBtn');
+var fileSearchBtnText = document.getElementById('fileSearchBtnText');
+var fileSearchSpinner = document.getElementById('fileSearchSpinner');
+
+function doFileSearch() {
+  var filename = fileSearchFilename.value.trim();
+  var query = fileSearchQuery.value.trim();
+  if (!filename || !query) {
+    showToast('Both filename and query are required', 'error');
+    return;
+  }
+
+  var resultsSection = document.getElementById('fileSearchResults');
+  var emptyEl = document.getElementById('fileSearchEmpty');
+  var countEl = document.getElementById('fileSearchCount');
+  var tableEl = document.getElementById('fileSearchTable');
+  var bodyEl = document.getElementById('fileSearchBody');
+
+  resultsSection.classList.remove('hidden');
+  emptyEl.classList.add('hidden');
+  countEl.classList.add('hidden');
+  tableEl.classList.add('hidden');
+  fileSearchBtn.disabled = true;
+  fileSearchBtnText.textContent = 'Searching...';
+  fileSearchSpinner.classList.remove('hidden');
+
+  fetch('/api/filesearch?filename=' + encodeURIComponent(filename) + '&q=' + encodeURIComponent(query))
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      fileSearchBtn.disabled = false;
+      fileSearchBtnText.textContent = 'Search';
+      fileSearchSpinner.classList.add('hidden');
+      if (data.error) { showToast(data.error, 'error'); return; }
+      if (data.length === 0) {
+        emptyEl.classList.remove('hidden');
+        return;
+      }
+      countEl.textContent = data.length + ' match' + (data.length === 1 ? '' : 'es') + ' found';
+      countEl.classList.remove('hidden');
+      bodyEl.innerHTML = '';
+      data.forEach(function(m) {
+        var tr = document.createElement('tr');
+        tr.className = 'border-b border-surface-700 hover:bg-surface-700/50 transition-colors';
+        tr.innerHTML =
+          '<td class="py-3 pr-4 text-right text-gray-400">' + m.line_number + '</td>' +
+          '<td class="py-3 text-gray-200 font-mono text-xs break-all">' + escapeHtml(m.line_text) + '</td>';
+        bodyEl.appendChild(tr);
+      });
+      tableEl.classList.remove('hidden');
+    })
+    .catch(function(err) {
+      fileSearchBtn.disabled = false;
+      fileSearchBtnText.textContent = 'Search';
+      fileSearchSpinner.classList.add('hidden');
+      showToast('File search failed: ' + err.message, 'error');
+    });
+}
+
+fileSearchBtn.addEventListener('click', doFileSearch);
+fileSearchQuery.addEventListener('keydown', function(e) { if (e.key === 'Enter') doFileSearch(); });
+fileSearchFilename.addEventListener('keydown', function(e) { if (e.key === 'Enter') doFileSearch(); });
 
 // Helpers
 function escapeHtml(s) {

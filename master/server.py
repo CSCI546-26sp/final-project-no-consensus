@@ -13,6 +13,8 @@ from proto.heartbeat_pb2 import ChunkMatch
 from proto.heartbeat_pb2_grpc import HeartbeatServiceServicer, HeartbeatServiceStub
 from proto import master_pb2, heartbeat_pb2, master_pb2_grpc, heartbeat_pb2_grpc
 
+from proto.master_pb2 import FileSearchRequest, FileSearchResponse, FileSearchMatch
+
 class FileMetaData:
     filename: str
     filesize: int
@@ -204,6 +206,59 @@ class MasterServer(MasterServiceServicer, HeartbeatServiceServicer):
                 for (filename, [score, lineNumber, snippet, _]) in sortedResults
             ])
 
+    def FileSearch(self, request: FileSearchRequest, context: grpc.ServicerContext) -> FileSearchResponse:
+        if not request.query:
+            return FileSearchResponse(success = False, message = "Empty query")
+        
+        with self.lock:
+            if request.filename.startswith("._deleted_") or request.filename not in self.namespace:
+                context.set_code(grpc.StatusCode.NOT_FOUND)
+                context.set_details("File not found in current namespace")
+                return FileSearchResponse(success = False, message = "File not found in current namespace")
+            
+            chunkHandles = list(self.fileToChunks[request.filename])
+            tasks = []
+            for idx, chunkHandle in enumerate(chunkHandles):
+                serverIds = self.chunkToServers.get(chunkHandle, set())
+                aliveIds = [s for s in serverIds if self.serverInfo[s].alive]
+                if not aliveIds:
+                    continue
+                serverId = next(iter(aliveIds))
+                address = f"dfs-chunk{serverId}:{CHUNK_SERVER_PORTS[serverId]}"
+                tasks.append((idx, chunkHandle, address))
+            
+        results = []
+        with ThreadPoolExecutor() as executor:
+            futures = {
+                executor.submit(self._scanFanOut, address, chunkHandle, request.query): idx for (idx, chunkHandle, address) in tasks
+            }
+            for future in futures:
+                idx = futures[future]
+                for scanMatch in future.result():
+                    results.append((idx, scanMatch))
+        results.sort(key = lambda pair: (pair[0], pair[1].line_number))
+
+        matches = [
+            FileSearchMatch(
+                chunk_index = idx,
+                line_number = scanMatch.line_number,
+                line_text = scanMatch.line_text
+            )
+            for (idx, scanMatch) in results
+        ]
+        return FileSearchResponse(success = True, matches = matches)
+    
+    def _scanFanOut(self, serverAddress: str, chunkHandle: str, query: str):
+        try:
+            channel = grpc.insecure_channel(serverAddress)
+            stub = HeartbeatServiceStub(channel)
+            response = stub.ScanChunk(heartbeat_pb2.ScanChunkRequest(
+                chunk_handle = chunkHandle,
+                query = query
+            ))
+            return response.matches
+        except grpc.RpcError:
+            return []
 
     def _fanOut(self, serverAddress: str, request: master_pb2.SearchFilesRequest):
         try:

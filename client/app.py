@@ -202,5 +202,33 @@ def apiSearch():
     return jsonify(results)
 
 
+@app.route("/api/filesearch")
+def apiFileSearch():
+    filename = request.args.get("filename", "").strip()
+    query = request.args.get("q", "").strip()
+    if not filename or not query:
+        return jsonify({"error": "Filename and query are required"}), 400
+
+    try:
+        stub = getMasterStub()
+        response = stub.FileSearch(
+            master_pb2.FileSearchRequest(filename=filename, query=query)
+        )
+    except grpc.RpcError as e:
+        return jsonify({"error": e.details()}), 500
+
+    if not response.success:
+        return jsonify({"error": response.message}), 400
+
+    matches = []
+    for m in response.matches:
+        matches.append({
+            "chunk_index": m.chunk_index,
+            "line_number": m.line_number,
+            "line_text": m.line_text,
+        })
+    return jsonify(matches)
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080, debug=True)
