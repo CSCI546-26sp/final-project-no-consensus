@@ -4,6 +4,8 @@ Run from project root: python -m client.app
 """
 
 import grpc
+import os
+import time
 from io import BytesIO
 from flask import Flask, render_template, request, jsonify, send_file
 
@@ -39,7 +41,8 @@ def formatSize(size_bytes):
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    path = os.path.join(os.path.dirname(__file__), "templates", "Distributed File System.html")
+    return send_file(path)
 
 
 @app.route("/api/files")
@@ -54,6 +57,11 @@ def apiListFiles():
                 "file_size": f.file_size,
                 "file_size_human": formatSize(f.file_size),
                 "num_chunks": f.num_chunks,
+                "chunks": [{
+                    "handle": c.chunk_handle,
+                    "index": c.chunk_index,
+                    "server_ids": list(c.server_ids),
+                } for c in f.chunks],
             })
         return jsonify(files)
     except grpc.RpcError as e:
@@ -184,9 +192,11 @@ def apiSearch():
 
     try:
         stub = getMasterStub()
+        t0 = time.perf_counter()
         response = stub.SearchFiles(
             master_pb2.SearchFilesRequest(query=query)
         )
+        latency_ms = (time.perf_counter() - t0) * 1000
     except grpc.RpcError as e:
         return jsonify({"error": e.details()}), 500
 
@@ -197,9 +207,10 @@ def apiSearch():
             "score": round(r.score, 4),
             "line_number": r.line_number,
             "snippet": r.snippet,
+            "chunk_handle": r.chunk_handle,
         })
 
-    return jsonify(results)
+    return jsonify({"results": results, "latency_ms": latency_ms})
 
 
 @app.route("/api/filesearch")

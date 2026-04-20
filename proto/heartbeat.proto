@@ -24,6 +24,7 @@ message HeartbeatRequest {
   int32 server_id = 1;
   int64 available_disk = 2;          // bytes of free disk space
   repeated string chunk_handles = 3; // all chunks this server holds
+  int64 used_bytes = 4;              // bytes occupied by chunks on this server
 }
 
 message HeartbeatResponse {

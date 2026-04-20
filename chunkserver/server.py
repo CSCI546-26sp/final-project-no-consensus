@@ -53,7 +53,8 @@ class ChunkServer(ChunkServerServiceServicer, HeartbeatServiceServicer):
                 request = HeartbeatRequest(
                     server_id = self.serverId,
                     available_disk = self.store.getAvailableDisk(),
-                    chunk_handles = self.store.listChunks()
+                    chunk_handles = self.store.listChunks(),
+                    used_bytes = self.store.getUsedBytes()
                 )
                 stub.Heartbeat(request)
                 print(f"Heartbeat sent from server {self.serverId}")

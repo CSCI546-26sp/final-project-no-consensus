@@ -76,10 +76,17 @@ message DeleteFileResponse {
 
 message ListFilesRequest {}
 
+message ChunkInfo {
+  string chunk_handle = 1;
+  int32 chunk_index = 2;
+  repeated int32 server_ids = 3;
+}
+
 message FileInfo {
   string filename = 1;
   int64 file_size = 2;
   int32 num_chunks = 3;
+  repeated ChunkInfo chunks = 4;
 }
 
 message ListFilesResponse {

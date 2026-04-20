@@ -1,0 +1,1486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>no-consensus · DFS Console</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<style>
+:root {
+  --bg-0: #0a0b10;
+  --bg-1: #0f1119;
+  --bg-2: #161923;
+  --bg-3: #1e2230;
+  --bg-4: #252a3b;
+  --line: #262b3d;
+  --line-2: #323a54;
+  --ink-0: #eef0f7;
+  --ink-1: #b8bdd2;
+  --ink-2: #808699;
+  --ink-3: #525872;
+  --accent: oklch(0.72 0.17 255);
+  --accent-soft: oklch(0.72 0.17 255 / 0.15);
+  --accent-2: oklch(0.78 0.17 155);
+  --accent-3: oklch(0.78 0.17 45);
+  --danger: oklch(0.70 0.18 25);
+  --mono: 'Geist Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --sans: 'Geist', ui-sans-serif, -apple-system, system-ui;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: var(--bg-0); color: var(--ink-0); font-family: var(--sans); overflow: hidden; height: 100vh; font-size: 14px; }
+body {
+  background:
+    radial-gradient(ellipse 1400px 900px at 50% -10%, oklch(0.72 0.17 255 / 0.08), transparent 60%),
+    radial-gradient(ellipse 1000px 700px at 80% 110%, oklch(0.78 0.17 155 / 0.06), transparent 60%),
+    var(--bg-0);
+}
+button, input, select, textarea { font-family: inherit; }
+
+/* ===== Layout: topbar + stage (top) + control strip (bottom) ===== */
+.app {
+  display: grid;
+  grid-template-columns: 320px 1fr 360px;
+  grid-template-rows: 56px minmax(0, 1fr);
+  height: 100vh;
+  width: 100vw;
+}
+@media (max-width: 1280px) {
+  .app { grid-template-columns: 280px 1fr 320px; }
+}
+@media (max-width: 1000px) {
+  .app { grid-template-columns: 240px 1fr 280px; }
+}
+
+.topbar {
+  grid-column: 1 / -1;
+  display: flex; align-items: center; gap: 22px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(15,17,25,0.88);
+  backdrop-filter: blur(10px);
+  z-index: 30;
+}
+.logo { display: flex; align-items: center; gap: 12px; font-weight: 600; letter-spacing: -0.01em; font-size: 15px; }
+.logo-mark { width: 24px; height: 24px; display: grid; grid-template: 1fr 1fr / 1fr 1fr; gap: 2px; }
+.logo-mark span { background: var(--ink-0); border-radius: 2px; }
+.logo-mark span:nth-child(1) { background: var(--accent); }
+.logo-mark span:nth-child(4) { background: var(--accent-2); }
+.logo small { color: var(--ink-2); font-weight: 400; margin-left: 6px; font-size: 13px; }
+.cluster-status { display: flex; align-items: center; gap: 18px; margin-left: auto; font-family: var(--mono); font-size: 12px; color: var(--ink-1); }
+.stat { display: flex; align-items: center; gap: 7px; }
+.stat .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent-2); box-shadow: 0 0 8px var(--accent-2); }
+.stat .k { color: var(--ink-2); }
+.stat .v { color: var(--ink-0); font-weight: 500; }
+
+/* ===== Left panel ===== */
+.left {
+  border-right: 1px solid var(--line);
+  display: flex; flex-direction: column;
+  background: var(--bg-1);
+  min-height: 0;
+  overflow: hidden;
+}
+.panel-section { padding: 18px 20px; border-bottom: 1px solid var(--line); }
+.panel-section:last-child { border-bottom: none; }
+.panel-title {
+  font-size: 11.5px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--ink-2); margin-bottom: 14px; font-weight: 600;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.panel-title .count { font-family: var(--mono); color: var(--ink-1); background: var(--bg-2); padding: 3px 8px; border-radius: 5px; letter-spacing: 0; text-transform: none; font-size: 12px; font-weight: 400; }
+
+.drop {
+  border: 1px dashed var(--line-2);
+  border-radius: 10px;
+  padding: 16px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  background: var(--bg-2);
+}
+.drop:hover, .drop.over { border-color: var(--accent); background: oklch(0.72 0.17 255 / 0.06); }
+.drop-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 14px; color: var(--ink-0); font-weight: 500; }
+.drop-head .plus { width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; background: var(--bg-3); color: var(--ink-0); font-size: 16px; line-height: 1; }
+.drop-sub { font-size: 12px; color: var(--ink-2); margin-top: 6px; font-family: var(--mono); }
+.drop-file { margin-top: 12px; padding: 10px 12px; background: var(--bg-3); border-radius: 7px; display: flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 12.5px; color: var(--ink-0); }
+.drop-file .x { color: var(--ink-2); font-size: 13px; margin-left: auto; cursor: pointer; padding: 2px 7px; border-radius: 4px; }
+.drop-file .x:hover { background: var(--bg-2); color: var(--ink-0); }
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  background: var(--accent); color: #07101e;
+  border: none; padding: 11px 16px; border-radius: 8px;
+  font-weight: 600; font-size: 13.5px;
+  cursor: pointer; transition: filter 0.1s ease, transform 0.05s ease;
+  letter-spacing: -0.01em;
+}
+.btn:hover { filter: brightness(1.1); }
+.btn:active { transform: translateY(1px); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; filter: none; }
+.btn.full { width: 100%; margin-top: 12px; }
+
+/* File list */
+.file-list {
+  flex: 1; overflow-y: auto;
+  padding: 4px 10px 16px;
+  min-height: 0;
+}
+.file-list::-webkit-scrollbar { width: 7px; }
+.file-list::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 3px; }
+
+.file-row {
+  padding: 11px 12px;
+  border-radius: 8px;
+  display: grid;
+  grid-template-columns: 20px 1fr auto;
+  gap: 11px; align-items: center;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+.file-row:hover { background: var(--bg-2); }
+.file-row.active { background: var(--bg-2); box-shadow: inset 2px 0 0 var(--accent); }
+.file-icon { width: 16px; height: 20px; background: var(--bg-3); border-radius: 2px; border: 1px solid var(--line-2); position: relative; }
+.file-icon::before { content: ''; position: absolute; inset: 4px 3px; border-top: 1px solid var(--line-2); box-shadow: 0 4px 0 -1px var(--line-2), 0 8px 0 -1px var(--line-2); }
+.file-name { font-size: 13.5px; color: var(--ink-0); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.file-meta { font-family: var(--mono); font-size: 11.5px; color: var(--ink-2); margin-top: 3px; }
+.file-chunks { display: flex; gap: 2px; align-items: center; }
+.chunk-pill { width: 6px; height: 14px; border-radius: 1.5px; background: var(--line-2); }
+.chunk-pill.s0 { background: oklch(0.72 0.17 255); }
+.chunk-pill.s1 { background: oklch(0.78 0.17 155); }
+.chunk-pill.s2 { background: oklch(0.78 0.17 45); }
+
+/* ===== Center stage ===== */
+.stage-wrap {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse 70% 50% at 50% 55%, oklch(0.25 0.02 260 / 0.6), transparent 75%),
+    linear-gradient(180deg, #0b0d14 0%, #080a10 100%);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.stage-wrap::before {
+  content: '';
+  position: absolute; inset: 0;
+  background-image:
+    linear-gradient(oklch(0.35 0.03 260 / 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, oklch(0.35 0.03 260 / 0.08) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse 80% 70% at 50% 50%, black 30%, transparent 90%);
+  pointer-events: none;
+}
+
+.stage-hud {
+  position: absolute; z-index: 5; pointer-events: none;
+  font-family: var(--mono); color: var(--ink-2); font-size: 12px; letter-spacing: 0.04em;
+}
+.stage-hud b { color: var(--ink-1); font-weight: 500; }
+.hud-tl { top: 16px; left: 16px; }
+.hud-tr { top: 16px; right: 16px; text-align: right; }
+
+.scene {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  perspective: 1800px;
+  perspective-origin: 50% 30%;
+  overflow: hidden;
+}
+.world {
+  position: absolute;
+  transform-style: preserve-3d;
+  transform: rotateX(24deg);
+  transform-origin: center center;
+}
+/* Floor */
+.floor {
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 1200px; height: 1200px;
+  margin-left: -600px; margin-top: -600px;
+  transform-style: preserve-3d;
+  transform: rotateX(90deg) translateZ(-180px);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, oklch(0.72 0.17 255 / 0.04) 0%, transparent 55%),
+    repeating-radial-gradient(circle, transparent 0 80px, oklch(0.35 0.03 260 / 0.15) 80px 81px);
+  pointer-events: none;
+}
+.floor::before {
+  content: ''; position: absolute; inset: 30%;
+  border: 1px dashed oklch(0.72 0.17 255 / 0.25);
+  border-radius: 50%;
+  animation: spin 80s linear infinite;
+}
+.floor::after {
+  content: ''; position: absolute; inset: 8%;
+  border: 1px solid oklch(0.35 0.03 260 / 0.25);
+  border-radius: 50%;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ===== Rack-style server ===== */
+.node {
+  position: absolute;
+  left: 50%; top: 50%;
+  transform-style: preserve-3d;
+  --rw: 204px;
+  --rh: 240px;
+  --rd: 108px;
+}
+.node.master { --rw: 200px; --rh: 230px; --rd: 110px; }
+
+.rack {
+  position: relative;
+  width: var(--rw); height: var(--rh);
+  transform-style: preserve-3d;
+  transform: translate(-50%, -50%);
+}
+.rface { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+
+/* front face — the detailed one */
+.rface.front {
+  transform: translateZ(calc(var(--rd) / 2));
+  background: linear-gradient(180deg, #1a1e2c, #10131c);
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  display: flex; flex-direction: column;
+  padding: 8px 8px 10px;
+  box-shadow: 0 2px 0 rgba(0,0,0,0.3) inset;
+}
+.rface.back {
+  transform: translateZ(calc(var(--rd) / -2)) rotateY(180deg);
+  background: #0c0e16;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.rface.left {
+  width: var(--rd);
+  transform: translateX(calc(var(--rd) / -2)) rotateY(-90deg);
+  background: linear-gradient(180deg, #14172180, #0a0c1480);
+  border: 1px solid var(--line);
+}
+.rface.right {
+  width: var(--rd);
+  left: calc(100% - var(--rd));
+  transform: translateX(calc(var(--rd) / 2)) rotateY(90deg);
+  background: linear-gradient(180deg, #14172180, #0a0c1480);
+  border: 1px solid var(--line);
+}
+.rface.top {
+  height: var(--rd);
+  transform: translateY(calc(var(--rd) / -2)) rotateX(90deg);
+  top: calc(var(--rd) / 2);
+  background: linear-gradient(90deg, #181c28, #11141d);
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+}
+.rface.bottom {
+  height: var(--rd);
+  transform: translateY(calc(var(--rd) / 2)) rotateX(-90deg);
+  top: calc(100% - var(--rd) / 2);
+  background: #05060a;
+  border: 1px solid var(--line);
+}
+
+/* rack header (front) */
+.rack-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 6px;
+}
+.rack-header .name { font-family: var(--mono); font-size: 11.5px; color: var(--ink-0); font-weight: 600; letter-spacing: 0.03em; }
+.node.master .rack-header .name { font-size: 13px; }
+.rack-header .status-led { width: 8px; height: 8px; border-radius: 50%; background: var(--accent-2); box-shadow: 0 0 6px var(--accent-2); animation: blink 1.8s ease-in-out infinite; }
+.node.master .rack-header .status-led { background: var(--accent-3); box-shadow: 0 0 6px var(--accent-3); }
+@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+/* disk bays — stacked horizontal rectangles */
+.bays { display: flex; flex-direction: column; gap: 3px; flex: 1; }
+.bay {
+  height: 14px;
+  background: linear-gradient(90deg, #0d1019, #141824);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  display: flex; align-items: center;
+  padding: 0 5px 0 4px;
+  gap: 5px;
+  font-family: var(--mono); font-size: 9px; color: var(--ink-3);
+  position: relative;
+}
+.bay .bay-led { width: 4px; height: 4px; border-radius: 50%; background: var(--line-2); flex-shrink: 0; }
+.bay .bay-bar { flex: 1; height: 2px; background: var(--bg-3); border-radius: 1px; overflow: hidden; }
+.bay .bay-fill { height: 100%; background: var(--line-2); transition: width 0.3s ease; }
+.bay.used .bay-led { background: var(--_c, var(--accent)); box-shadow: 0 0 4px var(--_c, var(--accent)); }
+.bay.used .bay-fill { background: var(--_c, var(--accent)); }
+.bay.active .bay-led { animation: blink 0.5s ease-in-out infinite; }
+.bay.matched {
+  background: linear-gradient(90deg, oklch(0.3 0.1 155), oklch(0.4 0.15 155));
+  border-color: oklch(0.85 0.2 155);
+  box-shadow: 0 0 10px oklch(0.78 0.17 155 / 0.7), inset 0 0 6px oklch(0.85 0.2 155 / 0.4);
+  animation: matchBay 0.9s ease-in-out infinite alternate;
+}
+.bay.matched .bay-led { background: oklch(0.9 0.2 155); box-shadow: 0 0 6px oklch(0.9 0.2 155); }
+@keyframes matchBay {
+  from { filter: brightness(1); }
+  to { filter: brightness(1.3); }
+}
+
+/* rack footer — stats line */
+.rack-footer {
+  display: flex; justify-content: space-between; align-items: center;
+  font-family: var(--mono); font-size: 10.5px; color: var(--ink-2);
+  margin-top: 6px;
+  padding-top: 5px;
+  border-top: 1px solid var(--line);
+}
+.rack-footer b { color: var(--ink-1); font-weight: 500; }
+
+/* master has different front content: CPU-like grid + indicators */
+.master-brain {
+  flex: 1;
+  background:
+    linear-gradient(90deg, transparent 0 2px, oklch(0.35 0.03 260 / 0.35) 2px 3px) 0 0 / 20px 100%,
+    linear-gradient(180deg, transparent 0 2px, oklch(0.35 0.03 260 / 0.35) 2px 3px) 0 0 / 100% 16px,
+    radial-gradient(circle at 50% 50%, oklch(0.78 0.17 45 / 0.25), transparent 60%);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  position: relative;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+.master-brain .core {
+  width: 70%; height: 52%;
+  background: linear-gradient(135deg, oklch(0.78 0.17 45 / 0.18), oklch(0.25 0.05 260 / 0.5));
+  border: 1px solid oklch(0.78 0.17 45 / 0.5);
+  border-radius: 3px;
+  position: relative;
+  display: grid; place-items: center;
+  font-family: var(--mono); font-size: 10px; color: oklch(0.95 0.1 45); letter-spacing: 0.12em;
+  font-weight: 600;
+}
+.master-brain .core::before, .master-brain .core::after {
+  content: ''; position: absolute;
+  border: 1px solid oklch(0.78 0.17 45 / 0.4); border-radius: 1px;
+}
+.master-brain .core::before { inset: -6px; animation: pulseRing2 2.4s ease-out infinite; }
+.master-brain .core::after { inset: -12px; animation: pulseRing2 2.4s ease-out infinite 0.8s; }
+@keyframes pulseRing2 {
+  0% { opacity: 0.8; transform: scale(0.9); }
+  100% { opacity: 0; transform: scale(1.4); }
+}
+.master-meta {
+  margin-top: 6px;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 3px;
+  font-family: var(--mono); font-size: 10px; color: var(--ink-2);
+}
+.master-meta span b { color: var(--ink-1); font-weight: 500; }
+
+/* Server shadow on floor */
+.server-shadow {
+  position: absolute;
+  width: 140%; height: 60px;
+  left: -20%;
+  top: calc(100% - 20px);
+  transform: rotateX(90deg);
+  background: radial-gradient(ellipse at center, rgba(0,0,0,0.55), transparent 70%);
+  pointer-events: none;
+}
+
+/* glow ring under active servers */
+.server-glow {
+  position: absolute;
+  inset: -40px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--_gc, var(--accent)), transparent 65%);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+  filter: blur(18px);
+  transform: translateZ(-30px);
+}
+.node.glowing .server-glow { opacity: 0.55; }
+
+/* Server label above */
+.server-tag {
+  position: absolute;
+  top: -28px; left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-2);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.server-tag b { color: var(--ink-0); font-weight: 600; }
+
+/* Match badge */
+.match-badge {
+  position: absolute;
+  top: -58px; left: 50%;
+  transform: translateX(-50%);
+  background: oklch(0.85 0.2 155 / 0.18);
+  border: 1px solid oklch(0.85 0.2 155);
+  color: oklch(0.95 0.2 155);
+  font-family: var(--mono); font-size: 11.5px; font-weight: 500;
+  padding: 4px 10px;
+  border-radius: 6px;
+  white-space: nowrap;
+  animation: badgeIn 0.3s ease-out;
+  box-shadow: 0 0 16px oklch(0.78 0.17 155 / 0.4);
+}
+@keyframes badgeIn { from { opacity: 0; transform: translateX(-50%) translateY(4px); } to { opacity: 1; transform: translateX(-50%); } }
+
+/* Wires svg overlay */
+.wires { position: absolute; pointer-events: none; overflow: visible; }
+
+/* Flying packet */
+.packet {
+  position: absolute;
+  width: 20px; height: 20px;
+  transform-style: preserve-3d;
+  pointer-events: none;
+  will-change: transform;
+  z-index: 60;
+}
+.packet .pface {
+  position: absolute; inset: 0;
+  background: var(--_pc, var(--accent));
+  border: 1px solid oklch(from var(--_pc, var(--accent)) 0.95 c h);
+  box-shadow: 0 0 14px var(--_pc, var(--accent));
+  border-radius: 2px;
+}
+.packet .pface.top    { transform: rotateX(90deg)  translateZ(10px); }
+.packet .pface.front  { transform: translateZ(10px); }
+.packet .pface.back   { transform: rotateY(180deg) translateZ(10px); }
+.packet .pface.left   { transform: rotateY(-90deg) translateZ(10px); }
+.packet .pface.right  { transform: rotateY(90deg)  translateZ(10px); }
+.packet .pface.bottom { transform: rotateX(-90deg) translateZ(10px); }
+
+/* Pulse ring */
+.pulse-ring {
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 90px; height: 90px;
+  margin-left: -45px; margin-top: -45px;
+  border: 2px solid var(--_rc, var(--accent));
+  border-radius: 50%;
+  pointer-events: none;
+  animation: pulseRingA 1.2s ease-out forwards;
+  transform-style: preserve-3d;
+}
+@keyframes pulseRingA {
+  0% { opacity: 0.9; transform: translate3d(var(--_rx,0), 0, var(--_rz,0)) rotateX(90deg) scale(0.2); }
+  100% { opacity: 0; transform: translate3d(var(--_rx,0), 0, var(--_rz,0)) rotateX(90deg) scale(5); }
+}
+
+/* Client box */
+.client-node {
+  position: absolute;
+  left: 18px; top: 50%;
+  transform: translateY(-50%);
+  z-index: 6;
+  pointer-events: none;
+}
+.client-box {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 12px 14px;
+  font-family: var(--mono);
+  color: var(--ink-1);
+  display: flex; align-items: center; gap: 10px;
+  min-width: 130px;
+}
+.client-box .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+.client-box .ct-title { font-size: 13px; color: var(--ink-0); font-weight: 600; }
+.client-box .ct-sub { font-size: 11px; color: var(--ink-2); margin-top: 2px; }
+
+/* ===== Right panel ===== */
+.right {
+  border-left: 1px solid var(--line);
+  background: var(--bg-1);
+  display: flex; flex-direction: column;
+  min-height: 0;
+}
+.search-box { padding: 18px 20px; border-bottom: 1px solid var(--line); }
+
+.select-wrap {
+  display: flex; flex-direction: column; gap: 8px;
+}
+.select-row {
+  display: flex; align-items: center; gap: 10px;
+}
+.select-row .sl-label {
+  font-family: var(--mono); font-size: 12px; color: var(--ink-2);
+  min-width: 46px;
+}
+.select-row select {
+  flex: 1;
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  color: var(--ink-0);
+  padding: 9px 10px;
+  border-radius: 7px;
+  font-size: 13px;
+  font-family: var(--mono);
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+.select-row select:hover { border-color: var(--line-2); }
+.select-row select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+.search-input-wrap {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: 9px;
+  padding: 0 12px;
+  margin-top: 12px;
+  transition: border-color 0.15s ease;
+}
+.search-input-wrap:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.search-input-wrap input {
+  flex: 1;
+  background: transparent; border: none; outline: none;
+  color: var(--ink-0);
+  padding: 11px 0;
+  font-size: 14px;
+  font-family: var(--mono);
+}
+.search-input-wrap input::placeholder { color: var(--ink-3); }
+.search-input-wrap .kbd { font-family: var(--mono); font-size: 11px; color: var(--ink-2); padding: 3px 6px; border: 1px solid var(--line-2); border-radius: 4px; }
+
+.search-controls { display: flex; gap: 10px; margin-top: 12px; }
+
+.latency-bar {
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 12.5px;
+  display: flex; align-items: center; justify-content: space-between;
+  color: var(--ink-1);
+  background: var(--bg-2);
+}
+.latency-bar .big { color: var(--accent-2); font-weight: 600; font-size: 17px; letter-spacing: -0.02em; }
+.latency-bar .meta { color: var(--ink-2); }
+
+.results { flex: 1; overflow-y: auto; min-height: 0; }
+.results::-webkit-scrollbar { width: 7px; }
+.results::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 3px; }
+
+.result-empty { padding: 56px 28px; text-align: center; color: var(--ink-2); font-size: 14px; line-height: 1.6; }
+.result-empty .big-num {
+  font-family: var(--mono); font-size: 42px; font-weight: 600;
+  color: var(--ink-3); letter-spacing: -0.02em;
+  display: block; margin-bottom: 12px;
+}
+
+.result-item { padding: 14px 20px; border-bottom: 1px solid var(--line); cursor: pointer; transition: background 0.1s ease; }
+.result-item:hover { background: var(--bg-2); }
+.result-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.result-filename { font-size: 13.5px; font-weight: 500; color: var(--ink-0); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.result-score {
+  font-family: var(--mono); font-size: 11.5px;
+  color: var(--accent-2);
+  background: oklch(0.78 0.17 155 / 0.14);
+  padding: 3px 8px; border-radius: 5px; font-weight: 500;
+}
+.result-snippet {
+  font-family: var(--mono); font-size: 12.5px;
+  color: var(--ink-1);
+  line-height: 1.55;
+  background: var(--bg-2);
+  border-left: 2px solid var(--accent-2);
+  padding: 9px 12px;
+  border-radius: 0 6px 6px 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.result-snippet em {
+  color: var(--ink-0);
+  background: oklch(0.78 0.17 155 / 0.25);
+  padding: 0 3px; border-radius: 2px; font-style: normal; font-weight: 600;
+}
+.result-meta { display: flex; align-items: center; gap: 11px; margin-top: 8px; font-family: var(--mono); font-size: 11px; color: var(--ink-2); flex-wrap: wrap; }
+.result-meta .dot-c { width: 7px; height: 7px; border-radius: 2px; }
+.result-meta .dot-c.s0 { background: oklch(0.72 0.17 255); }
+.result-meta .dot-c.s1 { background: oklch(0.78 0.17 155); }
+.result-meta .dot-c.s2 { background: oklch(0.78 0.17 45); }
+
+/* Toasts */
+.toast-stack { position: fixed; top: 72px; right: 420px; z-index: 100; display: flex; flex-direction: column; gap: 10px; pointer-events: none; }
+@media (max-width: 1280px) { .toast-stack { right: 380px; } }
+.toast {
+  background: rgba(20,23,32,0.96);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--line-2);
+  border-left: 3px solid var(--accent);
+  padding: 10px 16px;
+  border-radius: 8px;
+  font-family: var(--mono); font-size: 13px;
+  color: var(--ink-0);
+  animation: toastIn 0.3s ease-out;
+  min-width: 280px;
+}
+.toast.ok { border-left-color: var(--accent-2); }
+.toast.err { border-left-color: var(--danger); }
+@keyframes toastIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+
+/* Tweaks panel */
+.tweaks {
+  position: fixed;
+  right: 420px;
+  bottom: 20px;
+  width: 280px;
+  background: rgba(15,17,25,0.96);
+  backdrop-filter: blur(14px);
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  padding: 16px;
+  z-index: 70;
+}
+.tweaks h4 { margin: 0 0 12px; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-2); font-weight: 600; }
+.tweak-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; gap: 12px; }
+.tweak-row label { color: var(--ink-1); font-size: 12.5px; }
+.tweak-row input[type=range] { width: 110px; }
+.tweak-row select { background: var(--bg-2); color: var(--ink-0); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; font-size: 12px; font-family: var(--mono); }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef, useMemo, useCallback } = React;
+
+/* ===== Utilities ===== */
+function humanSize(b) {
+  if (b < 1024) return b + ' B';
+  if (b < 1024*1024) return (b/1024).toFixed(1) + ' KB';
+  return (b/(1024*1024)).toFixed(1) + ' MB';
+}
+function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+function escapeHtml(s) { return s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'})[c]); }
+function highlightTokens(text, tokens) {
+  let html = escapeHtml(text);
+  tokens.forEach(tok => {
+    if (!tok) return;
+    const re = new RegExp('(' + escapeRe(tok) + ')', 'gi');
+    html = html.replace(re, '<em>$1</em>');
+  });
+  return html;
+}
+
+/* ===== Server positions — vertical layout with more breathing room ===== */
+const SERVER_POS = [
+  { id: 0, x: -240, y:  100, vy: 0, name: 'chunk-01' },
+  { id: 1, x:    0, y:  100, vy: 0, name: 'chunk-02' },
+  { id: 2, x:  240, y:  100, vy: 0, name: 'chunk-03' },
+];
+const MASTER_POS = { x: 0, y: 100, vy: -260, name: 'master' };
+
+const COLORS = ['s0', 's1', 's2'];
+const COLOR_HEX = ['oklch(0.72 0.17 255)', 'oklch(0.78 0.17 155)', 'oklch(0.78 0.17 45)'];
+
+/* ===== Stage ===== */
+function Stage({ state, tweaks }) {
+  const stageRef = useRef(null);
+  const [scale, setScale] = useState(1);
+  const [packets, setPackets] = useState([]);
+  const [pulses, setPulses] = useState([]);
+  const idRef = useRef(0);
+
+  // auto-fit
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    const update = () => {
+      const w = el.clientWidth;
+      const h = el.clientHeight;
+      const s = Math.min(w / 780, h / 620, 1);
+      setScale(Math.max(0.35, s));
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  useEffect(() => {
+    window.__stage = {
+      fireUploadPacket: (serverIdx, delayMs) => {
+        setTimeout(() => {
+          const id = ++idRef.current;
+          setPackets(p => [...p, { id, serverIdx }]);
+          setTimeout(() => setPackets(p => p.filter(x => x.id !== id)), 1800);
+        }, delayMs);
+      },
+      fireQueryPulse: () => {
+        const id = ++idRef.current;
+        setPulses(p => [...p, { id, at: 'master' }]);
+        setTimeout(() => setPulses(p => p.filter(x => x.id !== id)), 1200);
+        setTimeout(() => {
+          [0,1,2].forEach(i => {
+            const sid = ++idRef.current;
+            setPulses(p => [...p, { id: sid, at: 'c' + i }]);
+            setTimeout(() => setPulses(p => p.filter(x => x.id !== sid)), 1200);
+          });
+        }, 260);
+      },
+    };
+  }, []);
+
+  const serverChunks = useMemo(() => {
+    const out = [[], [], []];
+    state.files.forEach(f => {
+      f.chunks.forEach(c => {
+        const targets = (c.serverIds && c.serverIds.length) ? c.serverIds : [c.serverIdx];
+        targets.forEach(sid => {
+          if (out[sid]) out[sid].push({ ...c, matched: state.matchedHandles.has(c.handle) });
+        });
+      });
+    });
+    return out;
+  }, [state.files, state.matchedHandles]);
+
+  return (
+    <div ref={stageRef} className="stage-wrap">
+      <div className="stage-hud hud-tl">
+        <div><b>cluster</b> &nbsp;·&nbsp; no-consensus</div>
+        <div style={{ marginTop: 3, color: 'var(--ink-3)' }}>region us-west-2 · 192.168.40.0/24</div>
+      </div>
+      <div className="stage-hud hud-tr">
+        <div><b>uptime</b> &nbsp;14d 02:11:{String(state.sec).padStart(2,'0')}</div>
+        <div style={{ marginTop: 3, color: 'var(--ink-3)' }}>last gc · 00:03:42 ago</div>
+      </div>
+
+      <div className="client-node">
+        <div className="client-box">
+          <span className="dot"></span>
+          <div>
+            <div className="ct-title">client</div>
+            <div className="ct-sub">:8080</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="scene">
+        <div className="world" style={{ transform: `translate(-50%, -50%) scale(${scale}) rotateX(24deg)`, left: '50%', top: '50%', width: 700, height: 500 }}>
+          <div className="floor" />
+          <Wires />
+          <MasterNode pos={MASTER_POS} busy={state.stage === 'upload' || state.stage === 'searching'} />
+          {SERVER_POS.map((s, i) => (
+            <ChunkServerNode
+              key={i}
+              pos={s}
+              idx={i}
+              chunks={serverChunks[i]}
+              glowing={state.highlightServer === i}
+              totalMatches={state.serverMatches[i] || 0}
+              active={state.stage === 'searching' || state.stage === 'upload'}
+            />
+          ))}
+          {pulses.map(p => <PulseRing key={p.id} at={p.at} />)}
+          {packets.map(p => <Packet key={p.id} serverIdx={p.serverIdx} />)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Wires() {
+  const m = { x: MASTER_POS.x, y: MASTER_POS.y };
+  return (
+    <svg className="wires" width="1000" height="900"
+      style={{
+        left: '50%', top: '50%',
+        marginLeft: -500, marginTop: -450,
+        transform: 'rotateX(90deg) translateZ(-179px)',
+      }}>
+      <g transform="translate(500,450)">
+        {SERVER_POS.map((s, i) => (
+          <line key={i}
+            x1={m.x} y1={m.y}
+            x2={s.x} y2={s.y}
+            stroke={COLOR_HEX[i]} strokeOpacity="0.4"
+            strokeWidth="1.4" strokeDasharray="5 7">
+            <animate attributeName="stroke-dashoffset" from="0" to="-24" dur="2.2s" repeatCount="indefinite" />
+          </line>
+        ))}
+        {/* client -> master */}
+        <line x1={-500} y1={0} x2={m.x} y2={m.y}
+          stroke="var(--line-2)" strokeOpacity="0.5"
+          strokeWidth="1.2" strokeDasharray="3 6" />
+      </g>
+    </svg>
+  );
+}
+
+/* ===== Master — CPU-like front ===== */
+function MasterNode({ pos, busy }) {
+  return (
+    <div className="node master" style={{ transform: `translate3d(${pos.x}px, ${pos.vy ?? 0}px, ${pos.y}px)` }}>
+      <div className="server-shadow" />
+      <div className="server-glow" style={{ '--_gc': COLOR_HEX[2] }} />
+      <div className="rack">
+        <div className="rface back"></div>
+        <div className="rface left"></div>
+        <div className="rface right"></div>
+        <div className="rface top"></div>
+        <div className="rface bottom"></div>
+        <div className="rface front">
+          <div className="rack-header">
+            <div className="name">dfs-master</div>
+            <div className="status-led"></div>
+          </div>
+          <div className="master-brain">
+            <div className="core">MASTER</div>
+          </div>
+          <div className="master-meta">
+            <span>ns <b>312</b></span>
+            <span>repl <b>×2</b></span>
+            <span>mem <b>48 MB</b></span>
+            <span>hb <b>3/3</b></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ===== Chunk Server — rack with disk bays ===== */
+function ChunkServerNode({ pos, idx, chunks, glowing, totalMatches, active }) {
+  const colorHex = COLOR_HEX[idx];
+  // Show 10 bay slots. Each bay represents one chunk OR empty.
+  const BAY_COUNT = 10;
+  const visible = chunks.slice(-BAY_COUNT);
+  const bays = [];
+  for (let i = 0; i < BAY_COUNT; i++) {
+    const c = visible[i];
+    bays.push(c || null);
+  }
+
+  return (
+    <div className={'node' + (glowing ? ' glowing' : '')} style={{ transform: `translate3d(${pos.x}px, ${pos.vy ?? 0}px, ${pos.y}px)` }}>
+      <div className="server-shadow" />
+      <div className="server-glow" style={{ '--_gc': colorHex }} />
+      {totalMatches > 0 && (
+        <div className="match-badge">{totalMatches} match{totalMatches > 1 ? 'es' : ''}</div>
+      )}
+      <div className="rack">
+        <div className="rface back"></div>
+        <div className="rface left"></div>
+        <div className="rface right"></div>
+        <div className="rface top"></div>
+        <div className="rface bottom"></div>
+        <div className="rface front">
+          <div className="rack-header">
+            <div className="name">{pos.name}</div>
+            <div className="status-led" style={{ background: colorHex, boxShadow: `0 0 6px ${colorHex}` }}></div>
+          </div>
+          <div className="bays">
+            {bays.map((c, i) => {
+              const filled = !!c;
+              const matched = c && c.matched;
+              return (
+                <div
+                  key={i}
+                  className={'bay ' + (filled ? 'used ' : '') + (matched ? 'matched ' : '') + (active && filled ? 'active' : '')}
+                  style={{ '--_c': colorHex }}
+                >
+                  <span className="bay-led"></span>
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 8.5, color: filled ? 'var(--ink-2)' : 'var(--ink-3)', minWidth: 14 }}>
+                    {String(i).padStart(2,'0')}
+                  </span>
+                  <span className="bay-bar">
+                    <span className="bay-fill" style={{ width: filled ? '100%' : '0%' }}></span>
+                  </span>
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 8.5, color: filled ? 'var(--ink-1)' : 'var(--ink-3)' }}>
+                    {filled ? c.handle.slice(0,4) : '----'}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          <div className="rack-footer">
+            <span>chunks <b>{chunks.length}</b></span>
+            <span>idx <b>{Math.floor(chunks.length * 18.3)}t</b></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Packet({ serverIdx }) {
+  const target = SERVER_POS[serverIdx];
+  const colorHex = COLOR_HEX[serverIdx];
+  return (
+    <div className="packet" style={{
+      left: '50%', top: '50%',
+      '--_pc': colorHex,
+      '--mx': `${MASTER_POS.x}px`,
+      '--mz': `${MASTER_POS.y}px`,
+      '--tx': `${target.x}px`,
+      '--tz': `${target.y}px`,
+      animation: 'flyPacket 1.7s cubic-bezier(.4,.05,.5,.95) forwards',
+    }}>
+      <div className="pface front"></div>
+      <div className="pface back"></div>
+      <div className="pface left"></div>
+      <div className="pface right"></div>
+      <div className="pface top"></div>
+      <div className="pface bottom"></div>
+    </div>
+  );
+}
+
+function PulseRing({ at }) {
+  let tx = 0, tz = -170;
+  let col = 'var(--accent-3)';
+  if (at.startsWith('c')) {
+    const i = parseInt(at.slice(1));
+    tx = SERVER_POS[i].x; tz = SERVER_POS[i].y;
+    col = COLOR_HEX[i];
+  }
+  return (
+    <div className="pulse-ring" style={{
+      '--_rc': col,
+      '--_rx': `${tx}px`,
+      '--_rz': `${tz}px`,
+    }} />
+  );
+}
+
+/* ===== Left panel ===== */
+function LeftPanel({ state, api }) {
+  const [dragOver, setDragOver] = useState(false);
+  const [queuedFile, setQueuedFile] = useState(null);
+  const inputRef = useRef();
+
+  const handleFile = (f) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      setQueuedFile({ filename: f.name, size: f.size, content: e.target.result });
+    };
+    reader.readAsText(f);
+  };
+
+  const doUpload = () => {
+    if (!queuedFile) return;
+    api.upload(queuedFile);
+    setQueuedFile(null);
+    if (inputRef.current) inputRef.current.value = '';
+  };
+
+
+  return (
+    <div className="left">
+      <div className="panel-section">
+        <div className="panel-title">upload</div>
+        <div
+          className={'drop' + (dragOver ? ' over' : '')}
+          onClick={() => inputRef.current?.click()}
+          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={(e) => {
+            e.preventDefault(); setDragOver(false);
+            const f = e.dataTransfer.files[0];
+            if (f) handleFile(f);
+          }}
+        >
+          <div className="drop-head">
+            <span>drop a text file</span>
+            <span className="plus">+</span>
+          </div>
+          <div className="drop-sub">split into {state.tweaks.chunkSize}-byte chunks · replicated ×{state.tweaks.replication}</div>
+          {queuedFile && (
+            <div className="drop-file" onClick={(e) => e.stopPropagation()}>
+              <span style={{ color: 'var(--accent)' }}>●</span>
+              <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>{queuedFile.filename}</span>
+              <span style={{ color: 'var(--ink-2)' }}>{humanSize(queuedFile.size)}</span>
+              <span className="x" onClick={() => setQueuedFile(null)}>✕</span>
+            </div>
+          )}
+          <input
+            ref={inputRef} type="file"
+            accept=".txt,.md,.log,.json,.csv,.py,.js,text/*"
+            style={{ display: 'none' }}
+            onChange={(e) => { const f = e.target.files[0]; if (f) handleFile(f); }}
+          />
+        </div>
+
+<button className="btn full" disabled={!queuedFile || state.stage === 'upload'} onClick={doUpload}>
+          {state.stage === 'upload' ? 'distributing chunks…' : 'upload + chunk + replicate'}
+        </button>
+      </div>
+
+      <div className="panel-section" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, paddingBottom: 0 }}>
+        <div className="panel-title">
+          <span>namespace</span>
+          <span className="count">{state.files.length}</span>
+        </div>
+        <div className="file-list">
+          {state.files.length === 0 && (
+            <div style={{ padding: '14px 8px', fontSize: 13, color: 'var(--ink-2)', fontFamily: 'var(--mono)', lineHeight: 1.6 }}>
+              namespace is empty.<br/>drop a file or seed one above.
+            </div>
+          )}
+          {state.files.map(f => (
+            <div
+              key={f.filename}
+              className={'file-row' + (state.selectedFile === f.filename ? ' active' : '')}
+              onClick={() => api.selectFile(f.filename)}
+            >
+              <div className="file-icon"></div>
+              <div style={{ minWidth: 0 }}>
+                <div className="file-name">{f.filename}</div>
+                <div className="file-meta">{humanSize(f.size)} · {f.chunks.length} chunks</div>
+              </div>
+              <div className="file-chunks" title="chunk → server">
+                {f.chunks.slice(0, 8).map(c => (
+                  <div key={c.handle} className={'chunk-pill ' + COLORS[c.serverIdx]} />
+                ))}
+                {f.chunks.length > 8 && <div style={{ color: 'var(--ink-3)', fontSize: 10, fontFamily: 'var(--mono)', marginLeft: 3 }}>+{f.chunks.length - 8}</div>}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ===== Right panel ===== */
+const SEARCH_MODES = [
+  { id: 'all',     label: 'All files — full-text fan-out' },
+  { id: 'file',    label: 'Single file — one target' },
+  { id: 'phrase',  label: 'Exact phrase — literal match' },
+  { id: 'prefix',  label: 'Prefix — token starts-with' },
+];
+
+function RightPanel({ state, api }) {
+  const [q, setQ] = useState('');
+  const [mode, setMode] = useState('all');
+  const [fileSel, setFileSel] = useState('');
+  const inputRef = useRef();
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); inputRef.current?.focus(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // Auto-select first file when switching to 'file' mode if none set
+  useEffect(() => {
+    if (mode === 'file' && !fileSel && state.files.length > 0) {
+      setFileSel(state.files[0].filename);
+    }
+  }, [mode, state.files, fileSel]);
+
+  const run = () => {
+    if (!q.trim()) return;
+    if (mode === 'file' && !fileSel) return;
+    api.search(q.trim(), mode, mode === 'file' ? fileSel : null);
+  };
+
+  return (
+    <div className="right">
+      <div className="search-box">
+        <div className="panel-title">query</div>
+
+        <div className="select-wrap">
+          <div className="select-row">
+            <span className="sl-label">mode</span>
+            <select value={mode} onChange={e => setMode(e.target.value)}>
+              {SEARCH_MODES.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+            </select>
+          </div>
+          {mode === 'file' && (
+            <div className="select-row">
+              <span className="sl-label">file</span>
+              <select value={fileSel} onChange={e => setFileSel(e.target.value)} disabled={state.files.length === 0}>
+                {state.files.length === 0 && <option value="">— no files stored —</option>}
+                {state.files.map(f => (
+                  <option key={f.filename} value={f.filename}>
+                    {f.filename} ({f.chunks.length} chunks)
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
+
+        <div className="search-input-wrap">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: 'var(--ink-2)', flexShrink: 0 }}>
+            <circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/>
+          </svg>
+          <input
+            ref={inputRef}
+            placeholder={mode === 'phrase' ? 'enter exact phrase…' : 'search across the cluster…'}
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') run(); }}
+          />
+          <span className="kbd">⌘K</span>
+        </div>
+        <div className="search-controls" style={{ display: 'flex', gap: 6 }}>
+          <button className="btn" style={{ flex: 1 }} disabled={state.stage === 'searching' || !q.trim() || (mode === 'file' && !fileSel)} onClick={run}>
+            {state.stage === 'searching' ? 'fanning out…' : 'run search'}
+          </button>
+          <button
+            className="btn"
+            style={{ flex: '0 0 auto' }}
+            disabled={state.stage === 'searching' || (!q && !state.lastQuery && state.results.length === 0)}
+            onClick={() => { setQ(''); api.clearSearch(); }}
+          >
+            clear
+          </button>
+        </div>
+      </div>
+
+      {(state.lastQuery || state.stage === 'searching') && (
+        <div className="latency-bar">
+          <div>
+            <span style={{ color: 'var(--ink-2)' }}>q=</span>
+            <span style={{ color: 'var(--ink-0)' }}>{state.lastQuery || '—'}</span>
+          </div>
+          <div><span className="big">{state.latencyMs.toFixed(2)} ms</span></div>
+          <div className="meta">{state.results.length} hit{state.results.length !== 1 ? 's' : ''}</div>
+        </div>
+      )}
+
+      <div className="results">
+        {!state.lastQuery && state.stage !== 'searching' && (
+          <div className="result-empty">
+            <span className="big-num">&lt; 1 ms</span>
+            search fans out to all three chunk servers in parallel.<br/>
+            each runs its local inverted index; the master merges by TF‑IDF.
+          </div>
+        )}
+        {state.stage === 'searching' && (
+          <div className="result-empty">
+            <span className="big-num" style={{ color: 'var(--accent)' }}>→</span>
+            polling chunk-01, chunk-02, chunk-03…
+          </div>
+        )}
+        {state.stage !== 'searching' && state.lastQuery && state.results.length === 0 && (
+          <div className="result-empty">no postings matched <code style={{ color: 'var(--ink-0)' }}>{state.lastQuery}</code></div>
+        )}
+        {state.results.map((r, i) => (
+          <div key={i} className="result-item" onClick={() => api.selectFile(r.filename)}>
+            <div className="result-head">
+              <div className="result-filename">{r.filename}</div>
+              <div className="result-score">{r.score.toFixed(3)}</div>
+            </div>
+            <div className="result-snippet" dangerouslySetInnerHTML={{ __html: r.snippetHtml }} />
+            <div className="result-meta">
+              <span>line {r.line}</span><span>·</span>
+              <span>chunk <span style={{ color: 'var(--ink-1)' }}>{r.chunkHandle}</span></span><span>·</span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                <span className={'dot-c ' + COLORS[r.serverIdx]}></span>
+                {SERVER_POS[r.serverIdx].name}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Toasts({ toasts }) {
+  return (
+    <div className="toast-stack">
+      {toasts.map(t => <div key={t.id} className={'toast ' + (t.kind || '')}>{t.msg}</div>)}
+    </div>
+  );
+}
+
+function TweaksPanel({ tweaks, setTweaks, visible }) {
+  if (!visible) return null;
+  return (
+    <div className="tweaks">
+      <h4>Tweaks</h4>
+      <div className="tweak-row">
+        <label>chunk size</label>
+        <select value={tweaks.chunkSize} onChange={e => setTweaks({ ...tweaks, chunkSize: parseInt(e.target.value) })}>
+          <option value="128">128 B</option>
+          <option value="256">256 B</option>
+          <option value="512">512 B</option>
+          <option value="1024">1 KB</option>
+        </select>
+      </div>
+      <div className="tweak-row">
+        <label>replication</label>
+        <select value={tweaks.replication} onChange={e => setTweaks({ ...tweaks, replication: parseInt(e.target.value) })}>
+          <option value="1">×1</option>
+          <option value="2">×2</option>
+          <option value="3">×3</option>
+        </select>
+      </div>
+      <div className="tweak-row">
+        <label>target latency</label>
+        <input type="range" min="0.3" max="3" step="0.1" value={tweaks.targetLatency} onChange={e => setTweaks({ ...tweaks, targetLatency: parseFloat(e.target.value) })}/>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--ink-1)', width: 44, textAlign: 'right' }}>{tweaks.targetLatency.toFixed(1)}ms</span>
+      </div>
+      <div className="tweak-row">
+        <label>animation speed</label>
+        <input type="range" min="0.3" max="2" step="0.1" value={tweaks.animSpeed} onChange={e => setTweaks({ ...tweaks, animSpeed: parseFloat(e.target.value) })}/>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--ink-1)', width: 44, textAlign: 'right' }}>{tweaks.animSpeed.toFixed(1)}×</span>
+      </div>
+    </div>
+  );
+}
+
+/* ===== App ===== */
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "chunkSize": 512,
+  "replication": 2,
+  "targetLatency": 0.8,
+  "animSpeed": 1
+}/*EDITMODE-END*/;
+
+function App() {
+  const [files, setFiles] = useState([]);
+  const [stage, setStage] = useState('idle');
+  const [toasts, setToasts] = useState([]);
+  const [highlightServer, setHighlightServer] = useState(null);
+  const [serverMatches, setServerMatches] = useState({});
+  const [matchedHandles, setMatchedHandles] = useState(new Set());
+  const [results, setResults] = useState([]);
+  const [lastQuery, setLastQuery] = useState('');
+  const [latencyMs, setLatencyMs] = useState(0);
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [sec, setSec] = useState(0);
+  const [tweaks, setTweaks] = useState(TWEAK_DEFAULTS);
+  const [tweaksVisible, setTweaksVisible] = useState(false);
+  const toastIdRef = useRef(0);
+  const filesRef = useRef(files);
+  useEffect(() => { filesRef.current = files; }, [files]);
+
+  useEffect(() => {
+    const t = setInterval(() => setSec(s => (s + 1) % 60), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const toast = (msg, kind) => {
+    const id = ++toastIdRef.current;
+    setToasts(ts => [...ts, { id, msg, kind }]);
+    setTimeout(() => setToasts(ts => ts.filter(t => t.id !== id)), 2400);
+  };
+
+  const refreshFiles = async () => {
+    const list = await fetch('/api/files').then(r => r.json());
+    setFiles(list.map(f => ({
+      filename: f.filename,
+      size: f.file_size,
+      content: '',
+      chunks: (f.chunks || []).map(c => {
+        const zeroBased = (c.server_ids || []).map(id => id - 1);
+        return {
+          handle: c.handle,
+          index: c.index,
+          serverIdx: zeroBased[0] ?? 0,
+          serverIds: zeroBased,
+        };
+      }),
+    })));
+  };
+
+  const upload = async (file) => {
+    if (filesRef.current.some(f => f.filename === file.filename)) {
+      toast('already exists', 'err');
+      return;
+    }
+    setStage('upload');
+    toast(`uploading ${file.filename}…`, 'ok');
+
+    const blob = typeof file.content === 'string'
+      ? new Blob([file.content], { type: 'text/plain' })
+      : file;
+    const fd = new FormData();
+    fd.append('file', blob, file.filename);
+
+    for (let i = 0; i < 6; i++) {
+      window.__stage?.fireUploadPacket(i % 3, i * 110);
+    }
+
+    try {
+      const res = await fetch('/api/upload', { method: 'POST', body: fd }).then(r => r.json());
+      if (res.error) {
+        toast(res.error, 'err');
+        setStage('idle');
+        return;
+      }
+      await refreshFiles();
+      toast(`stored ${file.filename} ✓`, 'ok');
+    } catch (e) {
+      toast('upload failed: ' + e.message, 'err');
+    } finally {
+      setStage('idle');
+    }
+  };
+
+  const search = async (query, mode, targetFile) => {
+    setStage('searching');
+    setLastQuery(query);
+    setMatchedHandles(new Set());
+    setServerMatches({});
+    setResults([]);
+    window.__stage?.fireQueryPulse();
+
+    try {
+      const handleToServer = {};
+      filesRef.current.forEach(f => f.chunks.forEach(c => handleToServer[c.handle] = c.serverIdx));
+      const tokens = query.toLowerCase().split(/\W+/).filter(Boolean);
+      const perServer = { 0: 0, 1: 0, 2: 0 };
+
+      let fileHits = [];
+      let latency = 0.8;
+
+      if (mode === 'file' && targetFile) {
+        const t0 = performance.now();
+        const res = await fetch('/api/filesearch?filename=' + encodeURIComponent(targetFile) + '&q=' + encodeURIComponent(query)).then(r => r.json());
+        latency = performance.now() - t0;
+        if (res.error) { toast(res.error, 'err'); setStage('idle'); return; }
+
+        const targetChunks = filesRef.current.find(f => f.filename === targetFile)?.chunks || [];
+        fileHits = (res || []).map(m => {
+          const chunk = targetChunks[m.chunk_index];
+          const sIdx = chunk?.serverIdx ?? 0;
+          const handle = chunk?.handle ?? '';
+          perServer[sIdx]++;
+          return {
+            filename: targetFile,
+            score: 1,
+            line: m.line_number,
+            snippetHtml: highlightTokens(m.line_text.slice(0, 200), tokens),
+            chunkHandle: handle,
+            serverIdx: sIdx,
+          };
+        });
+      } else {
+        const res = await fetch('/api/search?q=' + encodeURIComponent(query)).then(r => r.json());
+        latency = res.latency_ms ?? 0.8;
+        fileHits = (res.results || []).map(h => {
+          const sIdx = handleToServer[h.chunk_handle] ?? 0;
+          perServer[sIdx]++;
+          return {
+            filename: h.filename,
+            score: h.score,
+            line: h.line_number,
+            snippetHtml: highlightTokens(h.snippet, tokens),
+            chunkHandle: h.chunk_handle,
+            serverIdx: sIdx,
+          };
+        });
+      }
+
+      [0, 1, 2].forEach((sid, idx) => setTimeout(() => {
+        setHighlightServer(sid);
+        setServerMatches(p => ({ ...p, [sid]: perServer[sid] }));
+        setMatchedHandles(p => {
+          const s = new Set(p);
+          fileHits.forEach(h => { if (h.serverIdx === sid) s.add(h.chunkHandle); });
+          return s;
+        });
+      }, 200 + idx * 200));
+
+      setLatencyMs(latency);
+
+      setTimeout(() => {
+        setResults(fileHits);
+        setStage('idle');
+        setHighlightServer(null);
+        if (fileHits.length > 0) toast(`${fileHits.length} hit${fileHits.length > 1 ? 's' : ''} · ${latency.toFixed(2)}ms`, 'ok');
+        else toast('no matches', 'err');
+      }, 1000);
+    } catch (e) {
+      toast('search failed', 'err');
+      setStage('idle');
+    }
+  };
+
+  // Tweak mode plumbing
+  useEffect(() => {
+    const onMsg = (e) => {
+      if (!e.data || typeof e.data !== 'object') return;
+      if (e.data.type === '__activate_edit_mode') setTweaksVisible(true);
+      if (e.data.type === '__deactivate_edit_mode') setTweaksVisible(false);
+    };
+    window.addEventListener('message', onMsg);
+    try { window.parent.postMessage({ type: '__edit_mode_available' }, '*'); } catch {}
+    return () => window.removeEventListener('message', onMsg);
+  }, []);
+  useEffect(() => {
+    try { window.parent.postMessage({ type: '__edit_mode_set_keys', edits: tweaks }, '*'); } catch {}
+  }, [tweaks]);
+
+  useEffect(() => { refreshFiles(); }, []);
+
+  const clearSearch = () => {
+    setLastQuery('');
+    setResults([]);
+    setMatchedHandles(new Set());
+    setServerMatches({});
+    setLatencyMs(0);
+    setHighlightServer(null);
+    setStage('idle');
+  };
+
+  const api = { upload, search, toast, selectFile: setSelectedFile, clearSearch };
+  const state = { files, stage, highlightServer, serverMatches, matchedHandles, results, lastQuery, latencyMs, selectedFile, sec, tweaks };
+  const totalChunks = files.reduce((a, f) => a + f.chunks.length, 0);
+
+  return (
+    <div className="app">
+      <header className="topbar">
+        <div className="logo">
+          <div className="logo-mark"><span></span><span></span><span></span><span></span></div>
+          <span>no-consensus</span>
+          <small>distributed file system · search console</small>
+        </div>
+        <div className="cluster-status">
+          <div className="stat"><span className="dot" style={{ background: 'var(--accent-3)', boxShadow: '0 0 8px var(--accent-3)' }}></span><span className="k">master</span><span className="v">ok</span></div>
+          <div className="stat"><span className="dot"></span><span className="k">3/3</span><span className="v">chunkservers</span></div>
+          <div className="stat"><span className="k">files</span><span className="v">{files.length}</span></div>
+          <div className="stat"><span className="k">chunks</span><span className="v">{totalChunks}</span></div>
+          <div className="stat"><span className="k">repl</span><span className="v">×{tweaks.replication}</span></div>
+        </div>
+      </header>
+
+      <LeftPanel state={state} api={api} />
+      <Stage state={state} tweaks={tweaks} />
+      <RightPanel state={state} api={api} />
+
+      <Toasts toasts={toasts} />
+      <TweaksPanel tweaks={tweaks} setTweaks={setTweaks} visible={tweaksVisible} />
+
+      <style>{`
+        @keyframes flyPacket {
+          0%   { transform: translate3d(calc(-50vw - 200px), -10px, 0) scale(1); opacity: 0; }
+          6%   { opacity: 1; }
+          42%  { transform: translate3d(var(--mx), -40px, var(--mz)) scale(1); }
+          56%  { transform: translate3d(var(--mx), -20px, var(--mz)) scale(1.2); }
+          92%  { transform: translate3d(var(--tx), -60px, var(--tz)) scale(1); opacity: 1; }
+          100% { transform: translate3d(var(--tx), 0, var(--tz)) scale(0.5); opacity: 0; }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

@@ -28,8 +28,15 @@ class ChunkStore:
     def listChunks(self):
         return [f for f in os.listdir(self.dataDir) if os.path.isfile(os.path.join(self.dataDir, f))]
     
+    def getUsedBytes(self):
+        return sum(
+            os.path.getsize(os.path.join(self.dataDir, f))
+            for f in os.listdir(self.dataDir)
+            if os.path.isfile(os.path.join(self.dataDir, f))
+        )
+
     def getAvailableDisk(self):
-        return shutil.disk_usage(self.dataDir).free
+        return shutil.disk_usage(self.dataDir).free - self.getUsedBytes()
     
     def chunkExists(self, chunkHandle):
         return os.path.exists(os.path.join(self.dataDir, chunkHandle))

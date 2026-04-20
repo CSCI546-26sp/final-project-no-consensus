@@ -27,12 +27,14 @@ class FileMetaData:
 class ServerInfo:
     serverId: int
     availableDisk: int
+    usedBytes: int
     lastHeartbeat: float
     alive: bool
     chunkHandles: set[str]
-    def __init__(self, serverId, availableDisk):
+    def __init__(self, serverId, availableDisk, usedBytes = 0):
         self.serverId = serverId
         self.availableDisk = availableDisk
+        self.usedBytes = usedBytes
         self.lastHeartbeat = 0
         self.alive = True
         self.chunkHandles = set()
@@ -42,6 +44,7 @@ class MasterServer(MasterServiceServicer, HeartbeatServiceServicer):
         self.namespace: dict[str, FileMetaData] = {}
         self.fileToChunks: dict[str, list[str]] = defaultdict(list)
         self.chunkToServers: dict[str, set[int]] = {}
+        self.chunkPrimary: dict[str, int] = {}
         self.serverInfo: dict[int, ServerInfo] = {}
         self.lock = threading.Lock()
         self.deletedFiles: dict[str, float] = {}
@@ -50,10 +53,9 @@ class MasterServer(MasterServiceServicer, HeartbeatServiceServicer):
         return
     
     def selectServers(self, replicationFactor:int, exceptions: set[int] = None) -> list[ServerInfo]:
-        serverList = sorted([server for server in self.serverInfo.values() 
-                             if server.alive and (not exceptions or server.serverId not in exceptions)], 
-                            key = lambda server: server.availableDisk , 
-                            reverse = True)
+        serverList = sorted([server for server in self.serverInfo.values()
+                             if server.alive and (not exceptions or server.serverId not in exceptions)],
+                            key = lambda server: (server.usedBytes, server.serverId))
         if len(serverList) < replicationFactor:
             print(f"Warning: Only {len(serverList)} servers alive; requested {replicationFactor}")
         return serverList[0:replicationFactor]
@@ -71,15 +73,20 @@ class MasterServer(MasterServiceServicer, HeartbeatServiceServicer):
             assignments = []
             for i in range(numChunks):
                 chunkHandle = str(uuid.uuid4())
+                chunkBytes = min(CHUNK_SIZE, request.file_size - i * CHUNK_SIZE)
                 servers = self.selectServers(REPLICATION_FACTOR)
 
-                serverAddresses = [f"dfs-chunk{s.serverId}:{CHUNK_SERVER_PORTS[s.serverId]}" 
+                serverAddresses = [f"dfs-chunk{s.serverId}:{CHUNK_SERVER_PORTS[s.serverId]}"
                                    for s in servers]
                 self.fileToChunks[request.filename].append(chunkHandle)
                 self.chunkToServers[chunkHandle] = set(server.serverId for server in servers)
+                if servers:
+                    self.chunkPrimary[chunkHandle] = servers[0].serverId
+                    for s in servers:
+                        self.serverInfo[s.serverId].usedBytes += chunkBytes
 
-                assignments.append(master_pb2.ChunkAssignment(chunk_handle = chunkHandle, 
-                                                              chunk_index = i, 
+                assignments.append(master_pb2.ChunkAssignment(chunk_handle = chunkHandle,
+                                                              chunk_index = i,
                                                               server_addresses = serverAddresses))
                 
             self.namespace[request.filename] = FileMetaData(request.filename, 
@@ -141,20 +148,30 @@ class MasterServer(MasterServiceServicer, HeartbeatServiceServicer):
     
     def ListFiles(self, request: master_pb2.ListFilesRequest, context) -> master_pb2.ListFilesResponse:
         with self.lock:
-            return master_pb2.ListFilesResponse(files = list(
-                map(
-                    lambda item: master_pb2.FileInfo(
-                        filename = item[0],
-                        file_size = item[1].filesize,
-                        num_chunks = item[1].num_chunks
-                        ),
-                        filter(
-                            lambda item: not item[0].startswith("._deleted_"),
-                            self.namespace.items()
-                            )
-                    )
-                )
-            )
+            files = []
+            for filename, meta in self.namespace.items():
+                if filename.startswith("._deleted_"):
+                    continue
+                chunkInfos = []
+                for idx, chunkHandle in enumerate(self.fileToChunks.get(filename, [])):
+                    replicas = self.chunkToServers.get(chunkHandle, set())
+                    aliveReplicas = {s for s in replicas if self.serverInfo.get(s) and self.serverInfo[s].alive}
+                    primary = self.chunkPrimary.get(chunkHandle)
+                    if primary not in aliveReplicas:
+                        primary = next(iter(sorted(aliveReplicas)), None)
+                    ordered = ([primary] if primary is not None else []) + sorted(r for r in replicas if r != primary)
+                    chunkInfos.append(master_pb2.ChunkInfo(
+                        chunk_handle = chunkHandle,
+                        chunk_index = idx,
+                        server_ids = ordered,
+                    ))
+                files.append(master_pb2.FileInfo(
+                    filename = filename,
+                    file_size = meta.filesize,
+                    num_chunks = meta.num_chunks,
+                    chunks = chunkInfos,
+                ))
+            return master_pb2.ListFilesResponse(files = files)
     
     def SearchFiles(self, 
                     request: master_pb2.SearchFilesRequest, context) -> master_pb2.SearchFilesResponse:
@@ -189,21 +206,23 @@ class MasterServer(MasterServiceServicer, HeartbeatServiceServicer):
                 continue
 
             if filename not in fileScores:
-                fileScores[filename] = [0, match.line_number, match.snippet, match.score]
+                fileScores[filename] = [0, match.line_number, match.snippet, match.score, match.chunk_handle]
             fileScores[filename][0] += match.score
 
             if match.score > fileScores[filename][3]:
                 fileScores[filename][1] = match.line_number
                 fileScores[filename][2] = match.snippet
                 fileScores[filename][3] = match.score
+                fileScores[filename][4] = match.chunk_handle
 
         sortedResults = sorted(fileScores.items(), key = lambda x: x[1][0], reverse = True)
         return master_pb2.SearchFilesResponse(results = [
-            master_pb2.SearchResult(filename=filename, 
-                                    score=score, 
-                                    line_number=lineNumber, 
-                                    snippet=snippet) 
-                for (filename, [score, lineNumber, snippet, _]) in sortedResults
+            master_pb2.SearchResult(filename=filename,
+                                    chunk_handle=chunkHandle,
+                                    score=score,
+                                    line_number=lineNumber,
+                                    snippet=snippet)
+                for (filename, [score, lineNumber, snippet, _, chunkHandle]) in sortedResults
             ])
 
     def FileSearch(self, request: FileSearchRequest, context: grpc.ServicerContext) -> FileSearchResponse:
@@ -278,6 +297,7 @@ class MasterServer(MasterServiceServicer, HeartbeatServiceServicer):
             
             server = self.serverInfo[serverId]
             server.availableDisk = request.available_disk
+            server.usedBytes = request.used_bytes
             server.lastHeartbeat = time.time()
             server.alive = True
             server.chunkHandles = set(request.chunk_handles)
@@ -347,6 +367,7 @@ class MasterServer(MasterServiceServicer, HeartbeatServiceServicer):
                     chunkHandles = self.fileToChunks.pop(hiddenName, [])
                     for chunkHandle in chunkHandles:
                         self.chunkToServers.pop(chunkHandle, None)
+                        self.chunkPrimary.pop(chunkHandle, None)
 
                     self.namespace.pop(hiddenName, None)
                     del self.deletedFiles[hiddenName]
