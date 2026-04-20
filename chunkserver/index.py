@@ -65,13 +65,14 @@ class InvertedIndex:
         return
     
     def removeChunk(self, chunkHandle):
-        # for term in list(self.index.keys()):
-        for term in self.chunkTerms.pop(chunkHandle, set()):
+        if chunkHandle not in self.chunkTerms:
+            return
+        for term in self.chunkTerms.pop(chunkHandle):
             self.index[term] = [p for p in self.index[term] if p.chunkHandle != chunkHandle]
             if not self.index[term]:
                 del self.index[term]
         self.totalChunks -= 1
-        return 
+        return
         
     def search(self, query):
         tokens = self.tokenize(query)

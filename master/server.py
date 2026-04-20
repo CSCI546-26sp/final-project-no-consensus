@@ -117,8 +117,8 @@ class MasterServer(MasterServiceServicer, HeartbeatServiceServicer):
             for idx, chunkHandle in enumerate(chunkHandles):
                 serverIds = self.chunkToServers[chunkHandle]
                 aliveAddresses = [
-                    f"dfs-chunk{s}:{CHUNK_SERVER_PORTS[s]}" for s in serverIds 
-                    if self.serverInfo[s].alive == True
+                    f"dfs-chunk{s}:{CHUNK_SERVER_PORTS[s]}" for s in serverIds
+                    if self.serverInfo.get(s) and self.serverInfo[s].alive
                 ]
                 locations.append(master_pb2.ChunkLocation(chunk_handle = chunkHandle, 
                                                           chunk_index = idx,
@@ -239,7 +239,7 @@ class MasterServer(MasterServiceServicer, HeartbeatServiceServicer):
             tasks = []
             for idx, chunkHandle in enumerate(chunkHandles):
                 serverIds = self.chunkToServers.get(chunkHandle, set())
-                aliveIds = [s for s in serverIds if self.serverInfo[s].alive]
+                aliveIds = [s for s in serverIds if self.serverInfo.get(s) and self.serverInfo[s].alive]
                 if not aliveIds:
                     continue
                 serverId = next(iter(aliveIds))
@@ -312,6 +312,7 @@ class MasterServer(MasterServiceServicer, HeartbeatServiceServicer):
         while True:
             time.sleep(HEARTBEAT_INTERVAL)
             replicationTasks = []
+            queued: set[str] = set()
 
             with self.lock:
                 now = time.time()
@@ -320,21 +321,24 @@ class MasterServer(MasterServiceServicer, HeartbeatServiceServicer):
                     if server.alive and (now - server.lastHeartbeat) > timeout:
                         server.alive = False
                         print(f"Server {serverId} marked as dead")
-                        
+
                         for chunkHandle in server.chunkHandles:
                             if chunkHandle in self.chunkToServers:
                                 self.chunkToServers[chunkHandle].discard(serverId)
-                                aliveReplicas = len(self.chunkToServers[chunkHandle])
-                                
-                                if 0 < aliveReplicas < REPLICATION_FACTOR:    
-                                    sourceId = next(iter(self.chunkToServers[chunkHandle]))
-                                    candidates = self.selectServers(
-                                        1, 
-                                        self.chunkToServers[chunkHandle])
-                                    
-                                    if candidates:
-                                        targetId = candidates[0].serverId
-                                        replicationTasks.append((chunkHandle, sourceId, targetId))
+
+                for (chunkHandle, replicas) in self.chunkToServers.items():
+                    aliveReplicas = {s for s in replicas
+                                     if self.serverInfo.get(s) and self.serverInfo[s].alive}
+                    if not (0 < len(aliveReplicas) < REPLICATION_FACTOR):
+                        continue
+                    if chunkHandle in queued:
+                        continue
+                    sourceId = next(iter(aliveReplicas))
+                    candidates = self.selectServers(1, replicas)
+                    if candidates:
+                        targetId = candidates[0].serverId
+                        replicationTasks.append((chunkHandle, sourceId, targetId))
+                        queued.add(chunkHandle)
             
             for (chunkHandle, sourceId, targetId) in replicationTasks:
                 sourceAddress = f"dfs-chunk{sourceId}:{CHUNK_SERVER_PORTS[sourceId]}"
@@ -355,24 +359,34 @@ class MasterServer(MasterServiceServicer, HeartbeatServiceServicer):
     def _garbageCollect(self):
         while True:
             time.sleep(GC_INTERVAL)
+            deleteTasks = []
+
             with self.lock:
                 now = time.time()
-                toRemove = []
+                toRemove = [h for h, t in self.deletedFiles.items() if (now - t) > GC_THRESHOLD]
 
-                for hiddenName, deletionTime in self.deletedFiles.items():
-                    if (now - deletionTime) > GC_THRESHOLD:
-                        toRemove.append(hiddenName)
-                
                 for hiddenName in toRemove:
                     chunkHandles = self.fileToChunks.pop(hiddenName, [])
                     for chunkHandle in chunkHandles:
+                        for sid in self.chunkToServers.get(chunkHandle, set()):
+                            info = self.serverInfo.get(sid)
+                            if info and info.alive:
+                                deleteTasks.append((chunkHandle, sid))
                         self.chunkToServers.pop(chunkHandle, None)
                         self.chunkPrimary.pop(chunkHandle, None)
 
                     self.namespace.pop(hiddenName, None)
                     del self.deletedFiles[hiddenName]
-
                     print(f"Garbage collected: {hiddenName}")
+
+            for (chunkHandle, sid) in deleteTasks:
+                address = f"dfs-chunk{sid}:{CHUNK_SERVER_PORTS[sid]}"
+                try:
+                    channel = grpc.insecure_channel(address)
+                    stub = HeartbeatServiceStub(channel)
+                    stub.DeleteChunk(heartbeat_pb2.DeleteChunkRequest(chunk_handle = chunkHandle))
+                except grpc.RpcError as error:
+                    print(f"DeleteChunk failed for {chunkHandle} on server {sid}: {error.details()}")
 
 def serve():
     server = grpc.server(ThreadPoolExecutor(max_workers= 10))

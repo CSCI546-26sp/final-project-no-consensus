@@ -18,6 +18,7 @@ from proto.heartbeat_pb2_grpc import HeartbeatServiceServicer, HeartbeatServiceS
 from proto.heartbeat_pb2 import HeartbeatRequest, SearchChunksResponse, SearchChunksRequest, ChunkMatch
 from proto.heartbeat_pb2 import ReplicateChunkRequest, ReplicateChunkResponse
 from proto.heartbeat_pb2 import ScanChunkRequest, ScanChunkResponse, ScanMatch
+from proto.heartbeat_pb2 import DeleteChunkRequest, DeleteChunkResponse
 
 from proto.chunkserver_pb2 import WriteChunkResponse, WriteChunkRequest, ReadChunkRequest, ReadChunkResponse
 
@@ -39,7 +40,7 @@ class ChunkServer(ChunkServerServiceServicer, HeartbeatServiceServicer):
 
         for chunkHandle in self.store.listChunks():
             data = self.store.readChunk(chunkHandle)
-            self.index.indexChunk(chunkHandle, data.decode("utf-8"))
+            self.index.indexChunk(chunkHandle, data.decode("utf-8", errors="replace"))
 
         threading.Thread(target= self._sendHeartbeats, daemon=True).start()
         return
@@ -79,7 +80,7 @@ class ChunkServer(ChunkServerServiceServicer, HeartbeatServiceServicer):
 
         with self.lock:
             self.store.writeChunk(chunkHandle = chunkHandle, data = data)
-            self.index.indexChunk(chunkHandle = chunkHandle, text = data.decode("utf-8"))
+            self.index.indexChunk(chunkHandle = chunkHandle, text = data.decode("utf-8", errors="replace"))
 
         if len(forwardAddresses):
             nextAddress = forwardAddresses.popleft()
@@ -151,7 +152,7 @@ class ChunkServer(ChunkServerServiceServicer, HeartbeatServiceServicer):
 
             with self.lock:
                 self.store.writeChunk(chunkHandle = request.chunk_handle, data = data)
-                self.index.indexChunk(chunkHandle = request.chunk_handle, text = data.decode("utf-8"))
+                self.index.indexChunk(chunkHandle = request.chunk_handle, text = data.decode("utf-8", errors="replace"))
             return ReplicateChunkResponse(success = True, message = "Chunk Replicated")
         except grpc.RpcError as rpcError:
             return ReplicateChunkResponse(success = False, message = rpcError.details())
@@ -183,7 +184,18 @@ class ChunkServer(ChunkServerServiceServicer, HeartbeatServiceServicer):
                     line_text = line,
                 ))
         return ScanChunkResponse(matches = matches)
-        
+
+    def DeleteChunk(self,
+                    request: DeleteChunkRequest,
+                    context: grpc.ServicerContext) -> DeleteChunkResponse:
+        chunkHandle = request.chunk_handle
+        with self.lock:
+            if not self.store.chunkExists(chunkHandle = chunkHandle):
+                return DeleteChunkResponse(success = True, message = "Chunk not present")
+            self.store.deleteChunk(chunkHandle = chunkHandle)
+            self.index.removeChunk(chunkHandle)
+        return DeleteChunkResponse(success = True, message = "Chunk deleted")
+
 
 def serve():
     parser = argparse.ArgumentParser()

@@ -16,6 +16,9 @@ service HeartbeatService {
 
   //Master tells chunk server to scan a chunk for all lines matching a query
   rpc ScanChunk (ScanChunkRequest) returns (ScanChunkResponse);
+
+  // Master tells chunk server to delete a chunk (called by master GC)
+  rpc DeleteChunk (DeleteChunkRequest) returns (DeleteChunkResponse);
 }
 
 // --- Heartbeat ---
@@ -74,4 +77,15 @@ message ScanMatch {
 
 message ScanChunkResponse {
   repeated ScanMatch matches = 1;
+}
+
+// --- Delete (master -> chunk server) ---
+
+message DeleteChunkRequest {
+  string chunk_handle = 1;
+}
+
+message DeleteChunkResponse {
+  bool success = 1;
+  string message = 2;
 }
