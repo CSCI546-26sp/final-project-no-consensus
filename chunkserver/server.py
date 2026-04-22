@@ -123,20 +123,29 @@ class ChunkServer(ChunkServerServiceServicer, HeartbeatServiceServicer):
 
         return
     
-    def SearchChunks(self, 
-                     request: SearchChunksRequest, 
+    def SearchChunks(self,
+                     request: SearchChunksRequest,
                      context: grpc.ServicerContext) -> SearchChunksResponse:
+        TOP_K = 10
         with self.lock:
-            results = self.index.search(request.query)
+            results = self.index.search(request.query)[:TOP_K]
 
         matches = []
-        for (chunkHandle, [score, lineNumber, lineText]) in results:
+        for (chunkHandle, score, lineNumber) in results:
+            lineText = ""
+            try:
+                data = self.store.readChunk(chunkHandle)
+                lines = data.decode("utf-8", errors="replace").split("\n")
+                if 0 <= lineNumber < len(lines):
+                    lineText = lines[lineNumber]
+            except FileNotFoundError:
+                pass
             matches.append(ChunkMatch(
                 chunk_handle = chunkHandle,
                 line_number = lineNumber,
                 score = score,
-                snippet = lineText
-                ))
+                snippet = lineText,
+            ))
         return SearchChunksResponse(matches = matches)
     
     def ReplicateChunk(self, 

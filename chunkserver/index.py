@@ -1,98 +1,137 @@
 from collections import defaultdict
-from common.config import STOP_WORDS
-import re
+import array
+import bisect
 import math
+import re
+
+from common.config import STOP_WORDS
+
+def _encodePositions(positions):
+    """Delta-varint LEB128 encode a monotonic iterable of non-negative ints."""
+    out = bytearray()
+    prev = 0
+    for pos in positions:
+        delta = pos - prev
+        prev = pos
+        while delta >= 0x80:
+            out.append((delta & 0x7F) | 0x80)
+            delta >>= 7
+        out.append(delta)
+    return bytes(out)
+
+def _decodePositions(data):
+    """Yield absolute positions from delta-varint bytes object"""
+    pos = 0
+    shift = 0
+    current = 0
+    for byte in data:
+        current |= (byte & 0x7F) << shift
+        if byte & 0x80:
+            shift += 7
+        else:
+            pos += current
+            yield pos
+            current = 0
+            shift = 0
 
 class Posting:
+    __slots__ = ("chunkHandle", "frequency", "positions")
+
     chunkHandle: str
-    lineNumber: int
     frequency: int
-    lineText: str
+    positions: bytes
 
-    #This is for phrase matching. Not implementing 
-    #phrase matching in this iteration; will implement
-    #it in the future depending on time availability
-    positions: list[int]
-
-    def __init__(self, chunkHandle, lineNumber, 
-                 frequency, lineText, positions = None):
-        
+    def __init__(self, chunkHandle: str, frequency: int, positions: bytes):
         self.chunkHandle = chunkHandle
-        self.lineNumber = lineNumber
         self.frequency = frequency
-        self.lineText = lineText
-        self.positions = positions or []
+        self.positions = positions
+
 
 class InvertedIndex:
     index: dict[str, list[Posting]]
     chunkTerms: dict[str, set[str]]
+    lineBreaks: dict[str, "array.array"]
 
     def __init__(self):
         self.index = defaultdict(list)
-        self.totalChunks = 0
         self.chunkTerms = defaultdict(set)
-        self._TOKEN_PATTERN = re.compile(r'\W+')
+        self.lineBreaks = {}
+        self.totalChunks = 0
+        self._INDEX_PATTERN = re.compile(r"\w+|\n")
+        self._WORD_PATTERN = re.compile(r"\w+")
 
     def tokenize(self, text: str):
-        return list(filter(
-            lambda w: w and w not in STOP_WORDS, 
-            self._TOKEN_PATTERN.split(text.lower())))
-    
+        return [
+            match.group()
+            for match in self._WORD_PATTERN.finditer(text.lower())
+            if match.group() not in STOP_WORDS
+        ]
+
     def indexChunk(self, chunkHandle: str, text: str):
-        lines = text.split('\n')
-        chunkTermfrequency = defaultdict(int)
-        termLines = defaultdict(list)
+        termFrequency: dict[str, int] = defaultdict(int)
+        termPositions: dict[str, list[int]] = {}
+        lineBreaks = array.array("I")
 
-        for lineNumber, line in enumerate(lines):
-            tokens = self.tokenize(line)
-            linePositions = defaultdict(list)
-            
-            for position, token in enumerate(tokens):
-                chunkTermfrequency[token] += 1
-                linePositions[token].append(position)
+        tokenIndex = 0
+        for match in self._INDEX_PATTERN.finditer(text.lower()):
+            token = match.group()
+            if token == "\n":
+                lineBreaks.append(tokenIndex)
+                continue
+            if token not in STOP_WORDS:
+                termFrequency[token] += 1
+                positions = termPositions.get(token)
+                if positions is None:
+                    positions = []
+                    termPositions[token] = positions
+                positions.append(tokenIndex)
+            tokenIndex += 1
 
-            for token, positions in linePositions.items():
-                termLines[token].append((lineNumber, line, positions))
+        for term, frequency in termFrequency.items():
+            self.index[term].append(
+                Posting(chunkHandle, frequency, _encodePositions(termPositions[term]))
+            )
 
-        for term, locations in termLines.items():
-            for lineNumber, lineText, positions in locations:
-                self.index[term].append(
-                    Posting(chunkHandle, lineNumber, 
-                            chunkTermfrequency[term], lineText, positions)
-                )
-        self.chunkTerms[chunkHandle] = set(termLines.keys())
+        self.chunkTerms[chunkHandle] = set(termFrequency.keys())
+        self.lineBreaks[chunkHandle] = lineBreaks
         self.totalChunks += 1
-        return
-    
-    def removeChunk(self, chunkHandle):
+
+    def removeChunk(self, chunkHandle: str):
         if chunkHandle not in self.chunkTerms:
             return
         for term in self.chunkTerms.pop(chunkHandle):
             self.index[term] = [p for p in self.index[term] if p.chunkHandle != chunkHandle]
             if not self.index[term]:
                 del self.index[term]
+        self.lineBreaks.pop(chunkHandle, None)
         self.totalChunks -= 1
-        return
-        
-    def search(self, query):
+
+    def search(self, query: str):
+        """Returns [(chunkHandle, score, lineNumber), ...] sorted by score desc.
+        Line text is NOT returned — caller looks it up from the chunk store."""
         tokens = self.tokenize(query)
-        result: dict[str, list[int | str]] = {}
+        scores: dict[str, list] = {}
         for token in tokens:
             postings = self.index.get(token, [])
             if not postings:
                 continue
-            df = len(set(p.chunkHandle for p in postings))
+            df = len(postings)
             idf = math.log(1 + self.totalChunks / df)
             for posting in postings:
-                tf = posting.frequency
-                score = tf * idf
+                score = posting.frequency * idf
+                firstPosition = next(_decodePositions(posting.positions), 0)
+                entry = scores.get(posting.chunkHandle)
+                if entry is None:
+                    scores[posting.chunkHandle] = [score, firstPosition]
+                else:
+                    entry[0] += score
+                    if firstPosition < entry[1]:
+                        entry[1] = firstPosition
 
-                if posting.chunkHandle not in result:
-                    result[posting.chunkHandle] = [0, posting.lineNumber, posting.lineText]
-                result[posting.chunkHandle][0] += score
-
-        return sorted(result.items(), key=lambda x: x[1][0], reverse=True)
-    
-
-                    
-
+        ranked = []
+        for chunkHandle, (score, firstPosition) in scores.items():
+            breaks = self.lineBreaks.get(chunkHandle)
+            lineNumber = bisect.bisect_right(breaks, firstPosition) if breaks is not None else 0
+            ranked.append((chunkHandle, score, lineNumber))
+        ranked.sort(key=lambda x: x[1], reverse=True)
+        return ranked
