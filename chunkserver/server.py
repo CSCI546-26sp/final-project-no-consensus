@@ -42,8 +42,7 @@ class ChunkServer(ChunkServerServiceServicer, HeartbeatServiceServicer):
         threading.Thread(target=self._indexerLoop, daemon=True).start()
 
         for chunkHandle in self.store.listChunks():
-            data = self.store.readChunk(chunkHandle)
-            self.index.indexChunk(chunkHandle, data.decode("utf-8", errors="replace"))
+            self.indexQueue.put(chunkHandle)
 
         threading.Thread(target= self._sendHeartbeats, daemon=True).start()
         return
