@@ -67,7 +67,11 @@ class InvertedIndex:
             if match.group() not in STOP_WORDS
         ]
 
-    def indexChunk(self, chunkHandle: str, text: str):
+    def tokenizeChunk(self, chunkHandle: str, text: str):
+        """
+        Pure function - produces postings + linebreaks without touching shared state. 
+        Safe to call without a lock.
+        """
         termFrequency: dict[str, int] = defaultdict(int)
         termPositions: dict[str, list[int]] = {}
         lineBreaks = array.array("I")
@@ -87,14 +91,24 @@ class InvertedIndex:
                 positions.append(tokenIndex)
             tokenIndex += 1
 
-        for term, frequency in termFrequency.items():
-            self.index[term].append(
-                Posting(chunkHandle, frequency, _encodePositions(termPositions[term]))
-            )
+        postings = {
+            term : Posting(chunkHandle, frequency, _encodePositions(termPositions[term]))
+            for term, frequency in termFrequency.items()
+        }
+        return postings, lineBreaks
 
-        self.chunkTerms[chunkHandle] = set(termFrequency.keys())
+    def mergeChunk(self, chunkHandle: str, postings: dict, lineBreaks):
+        """Mutates shared state. caller must hold write lock"""
+        for term, posting in postings.items():
+            self.index[term].append(posting)
+        self.chunkTerms[chunkHandle] = set(postings.keys())
         self.lineBreaks[chunkHandle] = lineBreaks
         self.totalChunks += 1
+
+    def indexChunk(self, chunkHandle: str, text: str):
+        """Convenience wrapper used by sync paths"""
+        postings, lineBreaks = self.tokenizeChunk(chunkHandle, text)
+        self.mergeChunk(chunkHandle, postings, lineBreaks)
 
     def removeChunk(self, chunkHandle: str):
         if chunkHandle not in self.chunkTerms:

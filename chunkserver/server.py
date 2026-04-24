@@ -11,7 +11,7 @@ from chunkserver.index import InvertedIndex
 from chunkserver.store import ChunkStore
 from chunkserver.rwlock import RWLock
 
-from common.config import HEARTBEAT_INTERVAL, MASTER_HOST, MASTER_PORT, PIPELINE_QUEUE_MAXSIZE
+from common.config import HEARTBEAT_INTERVAL, MASTER_HOST, MASTER_PORT, PIPELINE_QUEUE_MAXSIZE, INDEXER_WORKERS
 
 from proto.chunkserver_pb2_grpc import ChunkServerServiceServicer, add_ChunkServerServiceServicer_to_server, ChunkServerServiceStub
 from proto.heartbeat_pb2_grpc import HeartbeatServiceServicer, HeartbeatServiceStub, add_HeartbeatServiceServicer_to_server
@@ -40,7 +40,8 @@ class ChunkServer(ChunkServerServiceServicer, HeartbeatServiceServicer):
         self.lock = RWLock()
 
         self.indexQueue: queue.Queue = queue.Queue()
-        threading.Thread(target=self._indexerLoop, daemon=True).start()
+        for _ in range(INDEXER_WORKERS):
+            threading.Thread(target=self._indexerLoop, daemon=True).start()
 
         # Enqueue existing chunks for async indexing; search may return partial                                                                                  
         # results until _indexerLoop drains the queue.
@@ -58,8 +59,9 @@ class ChunkServer(ChunkServerServiceServicer, HeartbeatServiceServicer):
             try:
                 data = self.store.readChunk(chunkHandle)
                 text = data.decode("utf-8", errors = "replace")
+                postings, lineBreaks = self.index.tokenizeChunk(chunkHandle, text)
                 with self.lock.writeLock():
-                    self.index.indexChunk(chunkHandle=chunkHandle, text=text)
+                    self.index.mergeChunk(chunkHandle, postings, lineBreaks)
             except Exception as ex:
                 print(f"Indexer error for chunk {chunkHandle}: {ex}")
     
