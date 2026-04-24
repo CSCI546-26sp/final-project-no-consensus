@@ -9,6 +9,7 @@ import queue
 
 from chunkserver.index import InvertedIndex
 from chunkserver.store import ChunkStore
+from chunkserver.rwlock import RWLock
 
 from common.config import HEARTBEAT_INTERVAL, MASTER_HOST, MASTER_PORT, PIPELINE_QUEUE_MAXSIZE
 
@@ -36,11 +37,13 @@ class ChunkServer(ChunkServerServiceServicer, HeartbeatServiceServicer):
         self.port = port
         self.store = ChunkStore(dataDir)
         self.index = InvertedIndex()
-        self.lock = threading.Lock()
+        self.lock = RWLock()
 
         self.indexQueue: queue.Queue = queue.Queue()
         threading.Thread(target=self._indexerLoop, daemon=True).start()
 
+        # Enqueue existing chunks for async indexing; search may return partial                                                                                  
+        # results until _indexerLoop drains the queue.
         for chunkHandle in self.store.listChunks():
             self.indexQueue.put(chunkHandle)
 
@@ -55,7 +58,7 @@ class ChunkServer(ChunkServerServiceServicer, HeartbeatServiceServicer):
             try:
                 data = self.store.readChunk(chunkHandle)
                 text = data.decode("utf-8", errors = "replace")
-                with self.lock:
+                with self.lock.writeLock():
                     self.index.indexChunk(chunkHandle=chunkHandle, text=text)
             except Exception as ex:
                 print(f"Indexer error for chunk {chunkHandle}: {ex}")
@@ -171,7 +174,7 @@ class ChunkServer(ChunkServerServiceServicer, HeartbeatServiceServicer):
     def ReadChunk(self, request: ReadChunkRequest, 
                   context: grpc.ServicerContext) -> Iterator[ReadChunkResponse]:
         chunkHandle = request.chunk_handle
-        with self.lock:
+        with self.lock.readLock():
             if not self.store.chunkExists(chunkHandle = chunkHandle):
                 context.set_code(grpc.StatusCode.NOT_FOUND)
                 context.set_details("Chunk does not exist")
@@ -191,7 +194,7 @@ class ChunkServer(ChunkServerServiceServicer, HeartbeatServiceServicer):
                      request: SearchChunksRequest,
                      context: grpc.ServicerContext) -> SearchChunksResponse:
         TOP_K = 10
-        with self.lock:
+        with self.lock.readLock():
             results = self.index.search(request.query)[:TOP_K]
 
         matches = []
@@ -244,7 +247,7 @@ class ChunkServer(ChunkServerServiceServicer, HeartbeatServiceServicer):
         if not query:
             return ScanChunkResponse()
 
-        with self.lock:
+        with self.lock.readLock():
             if not self.store.chunkExists(chunkHandle = chunkHandle):
                 context.set_code(grpc.StatusCode.NOT_FOUND)
                 context.set_details("Chunk does not exist")
@@ -268,7 +271,7 @@ class ChunkServer(ChunkServerServiceServicer, HeartbeatServiceServicer):
                     request: DeleteChunkRequest,
                     context: grpc.ServicerContext) -> DeleteChunkResponse:
         chunkHandle = request.chunk_handle
-        with self.lock:
+        with self.lock.writeLock():
             if not self.store.chunkExists(chunkHandle = chunkHandle):
                 return DeleteChunkResponse(success = True, message = "Chunk not present")
             self.store.deleteChunk(chunkHandle = chunkHandle)
