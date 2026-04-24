@@ -11,6 +11,7 @@ CHUNK_SERVER_PORTS = {
 
 # Chunk settings
 CHUNK_SIZE = 4 * 1024 * 1024  # 4 MB in bytes
+PIPELINE_QUEUE_MAXSIZE = 2
 
 # Replication
 REPLICATION_FACTOR = 2

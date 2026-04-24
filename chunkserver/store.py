@@ -8,19 +8,19 @@ class ChunkStore:
         return
     
     def writeChunk(self, chunkHandle, data):
-        path = os.path.join(self.dataDir, chunkHandle)
+        path = self.getChunkPath(chunkHandle)
         with open(path, "wb") as f:
             f.write(data)
 
     def readChunk(self, chunkHandle):
-        path = os.path.join(self.dataDir, chunkHandle)
+        path = self.getChunkPath(chunkHandle)
         if not os.path.exists(path): 
             raise FileNotFoundError(f"Specified chunkhandle {chunkHandle} does not exist")
         with open(path, 'rb') as f:
             return f.read()
         
     def deleteChunk(self, chunkHandle):
-        path = os.path.join(self.dataDir, chunkHandle)
+        path = self.getChunkPath(chunkHandle)
         if os.path.exists(path): 
             os.remove(path)
         return
@@ -39,4 +39,7 @@ class ChunkStore:
         return shutil.disk_usage(self.dataDir).free - self.getUsedBytes()
     
     def chunkExists(self, chunkHandle):
-        return os.path.exists(os.path.join(self.dataDir, chunkHandle))
+        return os.path.exists(self.getChunkPath(chunkHandle))
+    
+    def getChunkPath(self, chunkHandle):
+        return os.path.join(self.dataDir, chunkHandle)

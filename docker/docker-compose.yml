@@ -37,7 +37,7 @@ services:
       resources:
         limits:
           cpus: "1.0"
-          memory: 1G
+          memory: 2G
 
   chunkserver2:
     build:
@@ -59,7 +59,7 @@ services:
       resources:
         limits:
           cpus: "1.0"
-          memory: 1G
+          memory: 2G
 
   chunkserver3:
     build:
@@ -81,7 +81,7 @@ services:
       resources:
         limits:
           cpus: "1.0"
-          memory: 1G
+          memory: 2G
 
 networks:
   dfs-net:
