@@ -1,4 +1,5 @@
-from chunkserver.index import InvertedIndex, Posting, _decodePositions
+from chunkserver.index import InvertedIndex, Posting
+from chunkserver.varint import decodePositions as decodePositions
 
 
 def testTokenize():
@@ -55,8 +56,8 @@ def testIndexChunkPositionsStopWordsOccupySlots():
     idx = InvertedIndex()
     idx.indexChunk("chunk-002", "the brown fox")
 
-    brownPositions = list(_decodePositions(idx.index["brown"][0].positions))
-    foxPositions = list(_decodePositions(idx.index["fox"][0].positions))
+    brownPositions = list(decodePositions(idx.index["brown"][0].positions))
+    foxPositions = list(decodePositions(idx.index["fox"][0].positions))
     assert brownPositions == [1], \
         f"'brown' should be at position 1 (after 'the' slot), got {brownPositions}"
     assert foxPositions == [2], \
@@ -180,11 +181,11 @@ def testAdjacentPositionsForPhraseSearch():
     idx = InvertedIndex()
     idx.indexChunk("c", "the quick brown fox the lazy dog")
 
-    quickPos = list(_decodePositions(idx.index["quick"][0].positions))
-    brownPos = list(_decodePositions(idx.index["brown"][0].positions))
-    foxPos = list(_decodePositions(idx.index["fox"][0].positions))
-    lazyPos = list(_decodePositions(idx.index["lazy"][0].positions))
-    dogPos = list(_decodePositions(idx.index["dog"][0].positions))
+    quickPos = list(decodePositions(idx.index["quick"][0].positions))
+    brownPos = list(decodePositions(idx.index["brown"][0].positions))
+    foxPos = list(decodePositions(idx.index["fox"][0].positions))
+    lazyPos = list(decodePositions(idx.index["lazy"][0].positions))
+    dogPos = list(decodePositions(idx.index["dog"][0].positions))
 
     assert quickPos == [1]
     assert brownPos == [2]

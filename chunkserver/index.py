@@ -5,34 +5,8 @@ import math
 import re
 
 from common.config import STOP_WORDS
+from chunkserver.varint import encodePositions, decodePositions
 
-def _encodePositions(positions):
-    """Delta-varint LEB128 encode a monotonic iterable of non-negative ints."""
-    out = bytearray()
-    prev = 0
-    for pos in positions:
-        delta = pos - prev
-        prev = pos
-        while delta >= 0x80:
-            out.append((delta & 0x7F) | 0x80)
-            delta >>= 7
-        out.append(delta)
-    return bytes(out)
-
-def _decodePositions(data):
-    """Yield absolute positions from delta-varint bytes object"""
-    pos = 0
-    shift = 0
-    current = 0
-    for byte in data:
-        current |= (byte & 0x7F) << shift
-        if byte & 0x80:
-            shift += 7
-        else:
-            pos += current
-            yield pos
-            current = 0
-            shift = 0
 
 class Posting:
     __slots__ = ("chunkHandle", "frequency", "positions")
@@ -92,7 +66,7 @@ class InvertedIndex:
             tokenIndex += 1
 
         postings = {
-            term : Posting(chunkHandle, frequency, _encodePositions(termPositions[term]))
+            term : Posting(chunkHandle, frequency, encodePositions(termPositions[term]))
             for term, frequency in termFrequency.items()
         }
         return postings, lineBreaks
@@ -133,7 +107,7 @@ class InvertedIndex:
             idf = math.log(1 + self.totalChunks / df)
             for posting in postings:
                 score = posting.frequency * idf
-                firstPosition = next(_decodePositions(posting.positions), 0)
+                firstPosition = next(decodePositions(posting.positions), 0)
                 entry = scores.get(posting.chunkHandle)
                 if entry is None:
                     scores[posting.chunkHandle] = [score, firstPosition]

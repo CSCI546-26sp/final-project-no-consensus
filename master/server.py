@@ -14,6 +14,7 @@ from proto.heartbeat_pb2_grpc import HeartbeatServiceServicer, HeartbeatServiceS
 from proto import master_pb2, heartbeat_pb2, master_pb2_grpc, heartbeat_pb2_grpc
 
 from proto.master_pb2 import FileSearchRequest, FileSearchResponse, FileSearchMatch
+from proto.master_pb2 import FileIndexStatusRequest, FileIndexStatusResponse
 
 class FileMetaData:
     filename: str
@@ -44,6 +45,9 @@ class MasterServer(MasterServiceServicer, HeartbeatServiceServicer):
         self.namespace: dict[str, FileMetaData] = {}
         self.fileToChunks: dict[str, list[str]] = defaultdict(list)
         self.chunkToServers: dict[str, set[int]] = {}
+        # Union across all chunkservers — a chunkHandle is in here iff at least
+        # one replica has finished indexing it (per heartbeat).
+        self.indexedChunks: set[str] = set()
         self.chunkPrimary: dict[str, int] = {}
         self.serverInfo: dict[int, ServerInfo] = {}
         self.lock = threading.Lock()
@@ -266,7 +270,23 @@ class MasterServer(MasterServiceServicer, HeartbeatServiceServicer):
             for (idx, scanMatch) in results
         ]
         return FileSearchResponse(success = True, matches = matches)
-    
+
+    def FileIndexStatus(self, request: FileIndexStatusRequest, context: grpc.ServicerContext) -> FileIndexStatusResponse:
+        with self.lock:
+            if request.filename not in self.namespace:
+                context.set_code(grpc.StatusCode.NOT_FOUND)
+                context.set_details("File not found in current namespace")
+                return FileIndexStatusResponse(success = False, message = "File not found in current namespace")
+            chunkHandles = self.fileToChunks.get(request.filename, [])
+            total = len(chunkHandles)
+            indexed = sum(1 for h in chunkHandles if h in self.indexedChunks)
+        return FileIndexStatusResponse(
+            success = True,
+            indexed_chunks = indexed,
+            total_chunks = total,
+            done = (total > 0 and indexed == total),
+        )
+
     def _scanFanOut(self, serverAddress: str, chunkHandle: str, query: str):
         try:
             channel = grpc.insecure_channel(serverAddress)
@@ -305,6 +325,9 @@ class MasterServer(MasterServiceServicer, HeartbeatServiceServicer):
             for chunkHandle in request.chunk_handles:
                 if chunkHandle in self.chunkToServers:
                     self.chunkToServers[chunkHandle].add(serverId)
+
+            for chunkHandle in request.indexed_chunk_handles:
+                self.indexedChunks.add(chunkHandle)
 
             return heartbeat_pb2.HeartbeatResponse(success = True)
     

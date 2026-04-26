@@ -6,7 +6,9 @@ Run from project root: python -m client.app
 import grpc
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
+from threading import Semaphore
 from flask import Flask, render_template, request, jsonify, send_file
 
 from common.config import CHUNK_SIZE
@@ -16,6 +18,8 @@ from proto.master_pb2_grpc import MasterServiceStub
 app = Flask(__name__)
 
 MASTER_ADDRESS = "localhost:5050"
+UPLOAD_WORKERS = 4
+STREAM_SIZE = 512 * 1024
 
 
 def translateAddress(dockerAddress: str) -> str:
@@ -81,8 +85,13 @@ def apiUpload():
     if not name:
         name = file.filename
 
-    dataBytes = file.read()
-    size = len(dataBytes)
+    # Werkzeug already spooled big uploads to a SpooledTemporaryFile. Don't
+    # slurp the whole thing into memory — stream from file.stream in 512 KB
+    # pieces so peak resident stays bounded regardless of upload size.
+    stream = file.stream
+    stream.seek(0, 2)
+    size = stream.tell()
+    stream.seek(0)
 
     try:
         masterStub = getMasterStub()
@@ -95,35 +104,51 @@ def apiUpload():
     if not response.success:
         return jsonify({"error": response.message}), 400
 
-    for assignment in response.assignments:
-        chunkIndex = assignment.chunk_index
-        chunkData = dataBytes[chunkIndex * CHUNK_SIZE: (chunkIndex + 1) * CHUNK_SIZE]
-
-        addresses = assignment.server_addresses[:]
+    def uploadChunk(assignment, chunkBytes):
+        addresses = list(assignment.server_addresses)
         primaryAddress = translateAddress(addresses[0])
         forwardAddresses = addresses[1:]
 
         chunkChannel = grpc.insecure_channel(primaryAddress)
         chunkStub = chunkserver_pb2_grpc.ChunkServerServiceStub(chunkChannel)
 
-        STREAM_SIZE = 512 * 1024
-
-        def makeIterator(chunk, chunkHandle, forwards):
-            for i in range(0, len(chunk), STREAM_SIZE):
+        def iterator():
+            for i in range(0, len(chunkBytes), STREAM_SIZE):
                 yield chunkserver_pb2.WriteChunkRequest(
-                    chunk_handle=chunkHandle,
-                    data=chunk[i:i + STREAM_SIZE],
-                    forward_addresses=forwards,
+                    chunk_handle=assignment.chunk_handle,
+                    data=chunkBytes[i:i + STREAM_SIZE],
+                    forward_addresses=forwardAddresses,
                 )
 
-        try:
-            writeResponse = chunkStub.WriteChunk(
-                makeIterator(chunkData, assignment.chunk_handle, forwardAddresses)
-            )
-            if not writeResponse.success:
-                return jsonify({"error": f"Chunk {chunkIndex} write failed: {writeResponse.message}"}), 500
-        except grpc.RpcError as e:
-            return jsonify({"error": f"Chunk {chunkIndex} write error: {e.details()}"}), 500
+        writeResponse = chunkStub.WriteChunk(iterator())
+        if not writeResponse.success:
+            raise RuntimeError(f"Chunk {assignment.chunk_index} write failed: {writeResponse.message}")
+
+    # Bound in-flight chunks so peak resident is workers × CHUNK_SIZE (~16 MB at 4 × 4 MB),
+    # not the full upload size. Main thread reads each chunk into a buffer, blocking on the
+    # semaphore so it never reads ahead of worker capacity.
+    sortedAssignments = sorted(response.assignments, key=lambda a: a.chunk_index)
+    sem = Semaphore(UPLOAD_WORKERS)
+    futures = []
+    with ThreadPoolExecutor(max_workers=UPLOAD_WORKERS) as ex:
+        for assignment in sortedAssignments:
+            sem.acquire()
+            chunkIndex = assignment.chunk_index
+            thisChunkSize = min(CHUNK_SIZE, size - chunkIndex * CHUNK_SIZE)
+            chunkBytes = stream.read(thisChunkSize)
+            if len(chunkBytes) != thisChunkSize:
+                sem.release()
+                return jsonify({"error": "Upload stream ended unexpectedly"}), 500
+            fut = ex.submit(uploadChunk, assignment, chunkBytes)
+            fut.add_done_callback(lambda _: sem.release())
+            futures.append(fut)
+
+        for fut in futures:
+            err = fut.exception()
+            if err is not None:
+                if isinstance(err, grpc.RpcError):
+                    return jsonify({"error": f"Upload failed: {err.details()}"}), 500
+                return jsonify({"error": str(err)}), 500
 
     return jsonify({
         "message": f"Uploaded '{name}' ({formatSize(size)}, {len(response.assignments)} chunks)",
@@ -239,6 +264,25 @@ def apiFileSearch():
             "line_text": m.line_text,
         })
     return jsonify(matches)
+
+
+@app.route("/api/index-status/<path:filename>")
+def apiIndexStatus(filename):
+    try:
+        stub = getMasterStub()
+        response = stub.FileIndexStatus(
+            master_pb2.FileIndexStatusRequest(filename=filename)
+        )
+    except grpc.RpcError as e:
+        return jsonify({"error": e.details()}), 500
+
+    if not response.success:
+        return jsonify({"error": response.message}), 404
+    return jsonify({
+        "indexed_chunks": response.indexed_chunks,
+        "total_chunks": response.total_chunks,
+        "done": response.done,
+    })
 
 
 if __name__ == "__main__":

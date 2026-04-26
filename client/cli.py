@@ -1,12 +1,15 @@
 import click
 import grpc
 import os
+from concurrent.futures import ThreadPoolExecutor
 
 from common.config import CHUNK_SIZE
 from proto import master_pb2, master_pb2_grpc, chunkserver_pb2, chunkserver_pb2_grpc
 from proto.master_pb2_grpc import MasterServiceStub
 
 MASTER_ADDRESS = "localhost:5050"
+UPLOAD_WORKERS = 4
+STREAM_SIZE = 512 * 1024
 
 def translateAddress(dockerAddress: str) -> str:
     port = dockerAddress.split(":")[1]
@@ -42,32 +45,37 @@ def upload(filepath, name):
         click.echo(f"Error: {e.details()}")
         return
     
-    for assignment in response.assignments:
+    def uploadOneChunk(assignment):
         chunkIndex = assignment.chunk_index
         chunkStart = chunkIndex * CHUNK_SIZE
         chunkEnd = min(chunkStart + CHUNK_SIZE, len(dataBytes))
-        chunkData = dataBytes[ chunkStart: chunkEnd]
+        chunkData = dataBytes[chunkStart:chunkEnd]
 
-        addresses = assignment.server_addresses[:]
+        addresses = list(assignment.server_addresses)
         primaryAddress = translateAddress(addresses[0])
         forwardAddresses = addresses[1:]
 
         chunkChannel = grpc.insecure_channel(primaryAddress)
         chunkStub = chunkserver_pb2_grpc.ChunkServerServiceStub(chunkChannel)
 
-        STREAM_SIZE = 512 * 1024
-
-        def makeIterator(chunk, chunkHandle, forwards):
-            for i in range(0, len(chunk), STREAM_SIZE):
+        def makeIterator():
+            for i in range(0, len(chunkData), STREAM_SIZE):
                 yield chunkserver_pb2.WriteChunkRequest(
-                    chunk_handle = chunkHandle,
-                    data = chunk[i:i+STREAM_SIZE],
-                    forward_addresses = forwards
+                    chunk_handle = assignment.chunk_handle,
+                    data = chunkData[i:i+STREAM_SIZE],
+                    forward_addresses = forwardAddresses,
                 )
-        writeResponse = chunkStub.WriteChunk(makeIterator(chunkData, assignment.chunk_handle, forwardAddresses))
+
+        writeResponse = chunkStub.WriteChunk(makeIterator())
         if not writeResponse.success:
-            click.echo(f"Error writing chunk {chunkIndex}: {writeResponse.message}")
-            return
+            raise RuntimeError(f"chunk {chunkIndex}: {writeResponse.message}")
+
+    try:
+        with ThreadPoolExecutor(max_workers=UPLOAD_WORKERS) as ex:
+            list(ex.map(uploadOneChunk, response.assignments))
+    except Exception as e:
+        click.echo(f"Error writing chunk: {e}")
+        return
     click.echo(f"Uploaded '{name}' ({len(dataBytes)} bytes, {len(response.assignments)} chunks)")
 
     return

@@ -1,0 +1,98 @@
+Bench matrix: size=500MB, workers={1 4 8}
+Started at Sat Apr 25 17:32:51 PDT 2026
+INDEXER_WORKERS:
+INDEXER_WORKERS = 4
+PIPELINE_QUEUE_MAXSIZE:
+PIPELINE_QUEUE_MAXSIZE = 16
+
+=================================================
+  workers=1   size=500MB
+=================================================
+Synthesizing 500 MB of text...
+Source:   synthetic (500 MB)
+Size:     500.0 MB
+Filename: bench-500mb-1777163580.txt
+Mode:     direct
+
+master.UploadFile:    13 ms
+channel setup × 125:   total 20 ms   avg=0ms  min=0  p50=0  p95=0  max=0
+WriteChunk × 125 (per-thread): avg=591ms  min=41  p50=589  p95=793  max=1022
+Parallel section wall (1-way): 74.16s
+Direct upload total:  74.18s   throughput 6.7 MB/s
+
+Waiting for indexing...
+  indexed 117/125  (t=0.0s)
+  indexed 120/125  (t=1.6s)
+  indexed 124/125  (t=2.6s)
+  indexed 125/125  (t=3.7s)
+Indexing:     3.67s   throughput 136.3 MB/s
+
+=== Total wall (upload→searchable):  77.84s ===
+Cleaned up bench-500mb-1777163580.txt
+
+=================================================
+  workers=4   size=500MB
+=================================================
+Synthesizing 500 MB of text...
+Source:   synthetic (500 MB)
+Size:     500.0 MB
+Filename: bench-500mb-1777163672.txt
+Mode:     direct
+
+master.UploadFile:    8 ms
+channel setup × 125:   total 19 ms   avg=0ms  min=0  p50=0  p95=0  max=0
+WriteChunk × 125 (per-thread): avg=1641ms  min=55  p50=1650  p95=2329  max=2901
+Parallel section wall (4-way): 51.61s
+Direct upload total:  51.62s   throughput 9.7 MB/s
+
+Waiting for indexing...
+  indexed 45/125  (t=0.0s)
+  indexed 56/125  (t=1.5s)
+  indexed 63/125  (t=4.1s)
+  indexed 69/125  (t=7.2s)
+  indexed 82/125  (t=19.0s)
+  indexed 92/125  (t=19.5s)
+  indexed 97/125  (t=25.6s)
+  indexed 111/125  (t=26.6s)
+  indexed 116/125  (t=31.3s)
+  indexed 121/125  (t=38.5s)
+  indexed 125/125  (t=39.5s)
+Indexing:     39.49s   throughput 12.7 MB/s
+
+=== Total wall (upload→searchable):  91.11s ===
+Cleaned up bench-500mb-1777163672.txt
+
+=================================================
+  workers=8   size=500MB
+=================================================
+Synthesizing 500 MB of text...
+Source:   synthetic (500 MB)
+Size:     500.0 MB
+Filename: bench-500mb-1777163778.txt
+Mode:     direct
+
+master.UploadFile:    5 ms
+channel setup × 125:   total 18 ms   avg=0ms  min=0  p50=0  p95=0  max=0
+WriteChunk × 125 (per-thread): avg=1966ms  min=190  p50=1998  p95=2805  max=3088
+Parallel section wall (8-way): 31.52s
+Direct upload total:  31.53s   throughput 15.9 MB/s
+
+Waiting for indexing...
+  indexed 0/125  (t=0.0s)
+  indexed 15/125  (t=5.2s)
+  indexed 24/125  (t=8.7s)
+  indexed 31/125  (t=9.3s)
+  indexed 43/125  (t=32.3s)
+  indexed 61/125  (t=33.3s)
+  indexed 84/125  (t=53.3s)
+  indexed 97/125  (t=58.5s)
+Traceback (most recent call last):
+  File "/Users/rajivmurali/Documents/CSCI 546 - Distributed Systems/project/codebase/scripts/bench_upload.py", line 243, in <module>
+    main()
+  File "/Users/rajivmurali/Documents/CSCI 546 - Distributed Systems/project/codebase/scripts/bench_upload.py", line 229, in main
+    indexTime = waitForIndexing(filename)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rajivmurali/Documents/CSCI 546 - Distributed Systems/project/codebase/scripts/bench_upload.py", line 172, in waitForIndexing
+    raise TimeoutError(f"indexing didn't complete in {INDEX_TIMEOUT}s")
+TimeoutError: indexing didn't complete in 600s
+

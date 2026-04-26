@@ -615,6 +615,63 @@ button, input, select, textarea { font-family: inherit; }
 .result-meta .dot-c.s1 { background: oklch(0.78 0.17 155); }
 .result-meta .dot-c.s2 { background: oklch(0.78 0.17 45); }
 
+/* Indexing status panel */
+.index-status {
+  margin-top: 12px;
+  padding: 11px 12px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-family: var(--mono);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.index-status + .index-status { margin-top: 8px; }
+.index-status.done { border-color: oklch(0.78 0.17 155 / 0.55); }
+.index-status.error { border-color: oklch(0.70 0.18 25 / 0.55); }
+.index-status-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+}
+.index-status-row .ix-name {
+  color: var(--ink-0);
+  font-weight: 500;
+  flex: 1;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-size: 12.5px;
+}
+.index-status-row .ix-state { color: var(--ink-1); }
+.index-status.done .ix-state { color: var(--accent-2); font-weight: 500; }
+.index-status.error .ix-state { color: var(--danger); }
+.index-status-bar {
+  position: relative;
+  height: 4px;
+  background: var(--bg-3);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.index-status-bar .ix-fill {
+  position: absolute; left: 0; top: 0; bottom: 0;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.4s ease;
+}
+.index-status.done .ix-fill { background: var(--accent-2); }
+.index-status.error .ix-fill { background: var(--danger); }
+.index-status-bar.indeterminate .ix-fill {
+  width: 30% !important;
+  animation: ixSlide 1.4s ease-in-out infinite;
+}
+@keyframes ixSlide {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(380%); }
+}
+.index-status-meta {
+  font-size: 10.5px;
+  color: var(--ink-2);
+  letter-spacing: 0.02em;
+}
+
 /* Toasts */
 .toast-stack { position: fixed; top: 72px; right: 420px; z-index: 100; display: flex; flex-direction: column; gap: 10px; pointer-events: none; }
 @media (max-width: 1280px) { .toast-stack { right: 380px; } }
@@ -669,13 +726,24 @@ function humanSize(b) {
 function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 function escapeHtml(s) { return s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'})[c]); }
 function highlightTokens(text, tokens) {
+  // TF-IDF mode: highlight whole-word matches only, so "particle" doesn't
+  // also light up "particles" / "particled".
   let html = escapeHtml(text);
   tokens.forEach(tok => {
     if (!tok) return;
-    const re = new RegExp('(' + escapeRe(tok) + ')', 'gi');
+    const re = new RegExp('\\b(' + escapeRe(tok) + ')\\b', 'gi');
     html = html.replace(re, '<em>$1</em>');
   });
   return html;
+}
+
+function highlightPhrase(text, phrase) {
+  // File-search mode: the result is guaranteed to contain the literal phrase,
+  // so highlight the phrase itself as a single span — no word splitting.
+  const html = escapeHtml(text);
+  if (!phrase) return html;
+  const re = new RegExp('(' + escapeRe(phrase) + ')', 'gi');
+  return html.replace(re, '<em>$1</em>');
 }
 
 /* ===== Server positions — vertical layout with more breathing room ===== */
@@ -959,6 +1027,40 @@ function PulseRing({ at }) {
   );
 }
 
+/* ===== Indexing status row ===== */
+function IndexingStatusRow({ job }) {
+  const { filename, indexed, total, done, error, phase } = job;
+  const pct = total > 0 ? Math.min(100, Math.round((indexed / total) * 100)) : 0;
+  const cls = error ? 'index-status error' : (done ? 'index-status done' : 'index-status');
+  let stateText;
+  if (error) stateText = 'couldn’t verify';
+  else if (done) stateText = 'ready ✓';
+  else if (phase === 'uploading') stateText = 'uploading…';
+  else if (total > 0) stateText = `${indexed} / ${total} chunks`;
+  else stateText = 'indexing…';
+
+  const indeterminate = !done && !error && (phase === 'uploading' || total === 0);
+
+  let metaText;
+  if (error) metaText = 'try searching to check if the file is ready';
+  else if (done) metaText = 'searchable now';
+  else if (phase === 'uploading') metaText = 'writing chunks to chunkservers';
+  else metaText = 'building inverted + trigram indexes';
+
+  return (
+    <div className={cls}>
+      <div className="index-status-row">
+        <span className="ix-name">{filename}</span>
+        <span className="ix-state">{stateText}</span>
+      </div>
+      <div className={'index-status-bar' + (indeterminate ? ' indeterminate' : '')}>
+        <div className="ix-fill" style={{ width: (done || error) ? '100%' : `${pct}%` }} />
+      </div>
+      <div className="index-status-meta">{metaText}</div>
+    </div>
+  );
+}
+
 /* ===== Left panel ===== */
 function LeftPanel({ state, api }) {
   const [dragOver, setDragOver] = useState(false);
@@ -1020,6 +1122,14 @@ function LeftPanel({ state, api }) {
 <button className="btn full" disabled={!queuedFile || state.stage === 'upload'} onClick={doUpload}>
           {state.stage === 'upload' ? 'distributing chunks…' : 'upload + chunk + replicate'}
         </button>
+
+        {state.indexJobs.length > 0 && (
+          <div style={{ marginTop: 4 }}>
+            {state.indexJobs.map(job => (
+              <IndexingStatusRow key={job.id} job={job} />
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="panel-section" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, paddingBottom: 0 }}>
@@ -1062,8 +1172,6 @@ function LeftPanel({ state, api }) {
 const SEARCH_MODES = [
   { id: 'all',     label: 'All files — full-text fan-out' },
   { id: 'file',    label: 'Single file — one target' },
-  { id: 'phrase',  label: 'Exact phrase — literal match' },
-  { id: 'prefix',  label: 'Prefix — token starts-with' },
 ];
 
 function RightPanel({ state, api }) {
@@ -1126,7 +1234,7 @@ function RightPanel({ state, api }) {
           </svg>
           <input
             ref={inputRef}
-            placeholder={mode === 'phrase' ? 'enter exact phrase…' : 'search across the cluster…'}
+            placeholder={mode === 'file' ? 'search within the selected file…' : 'search across the cluster…'}
             value={q}
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') run(); }}
@@ -1264,9 +1372,84 @@ function App() {
   const [sec, setSec] = useState(0);
   const [tweaks, setTweaks] = useState(TWEAK_DEFAULTS);
   const [tweaksVisible, setTweaksVisible] = useState(false);
+  const [indexJobs, setIndexJobs] = useState([]);
   const toastIdRef = useRef(0);
+  const jobIdRef = useRef(0);
   const filesRef = useRef(files);
+  const indexJobsRef = useRef(indexJobs);
   useEffect(() => { filesRef.current = files; }, [files]);
+  useEffect(() => { indexJobsRef.current = indexJobs; }, [indexJobs]);
+
+  // Indexing-progress poller. One stable interval drives all active jobs so
+  // multiple concurrent uploads stay in sync without spawning N timers, and
+  // we don't tear the interval down on every state change.
+  useEffect(() => {
+    const POLL_MS = 1500;
+    const ERROR_THRESHOLD = 3;
+    const TIMEOUT_MS = 120000;
+    const READY_LINGER_MS = 2200;
+
+    const tick = async () => {
+      const jobs = indexJobsRef.current;
+      const now = Date.now();
+      const active = jobs.filter(j => !j.done && !j.error && j.phase !== 'uploading');
+      if (active.length === 0) return;
+
+      const updates = await Promise.all(active.map(async (job) => {
+        if (now - job.startedAt > TIMEOUT_MS) {
+          return { id: job.id, patch: { error: true, errorAt: Date.now() } };
+        }
+        try {
+          const r = await fetch('/api/index-status/' + encodeURIComponent(job.filename));
+          if (!r.ok) {
+            return { id: job.id, patch: { errorCount: job.errorCount + 1 } };
+          }
+          const data = await r.json();
+          if (data.error) {
+            return { id: job.id, patch: { errorCount: job.errorCount + 1 } };
+          }
+          return {
+            id: job.id,
+            patch: {
+              indexed: data.indexed_chunks ?? job.indexed,
+              total: data.total_chunks ?? job.total,
+              done: !!data.done,
+              errorCount: 0,
+            },
+          };
+        } catch (e) {
+          return { id: job.id, patch: { errorCount: job.errorCount + 1 } };
+        }
+      }));
+
+      setIndexJobs(prev => prev.map(j => {
+        const u = updates.find(x => x.id === j.id);
+        if (!u) return j;
+        const merged = { ...j, ...u.patch };
+        if (merged.errorCount >= ERROR_THRESHOLD && !merged.error) {
+          merged.error = true;
+          merged.errorAt = Date.now();
+        }
+        if (merged.done && !j.done) merged.completedAt = Date.now();
+        return merged;
+      }));
+    };
+
+    const pollTimer = setInterval(tick, POLL_MS);
+    // Auto-dismiss done/error rows after a brief linger.
+    const cleanupTimer = setInterval(() => {
+      const now = Date.now();
+      setIndexJobs(prev => {
+        const next = prev.filter(j => {
+          if (j.done && j.completedAt && now - j.completedAt > READY_LINGER_MS) return false;
+          if (j.error && j.errorAt && now - j.errorAt > READY_LINGER_MS * 2) return false;
+          return true;
+        });
+        return next.length === prev.length ? prev : next;
+      });
+    }, 600);
+    return () => { clearInterval(pollTimer); clearInterval(cleanupTimer); };
+  }, []);
 
   useEffect(() => {
     const t = setInterval(() => setSec(s => (s + 1) % 60), 1000);
@@ -1305,6 +1488,26 @@ function App() {
     setStage('upload');
     toast(`uploading ${file.filename}…`, 'ok');
 
+    // Create an "uploading" indexing job up-front so the user immediately sees a
+    // status row. It transitions to "indexing" once /api/upload returns.
+    const jobId = ++jobIdRef.current;
+    setIndexJobs(prev => [
+      ...prev.filter(j => j.filename !== file.filename),
+      {
+        id: jobId,
+        filename: file.filename,
+        phase: 'uploading',
+        indexed: 0,
+        total: 0,
+        done: false,
+        error: false,
+        errorCount: 0,
+        startedAt: Date.now(),
+        completedAt: null,
+        errorAt: null,
+      },
+    ]);
+
     const blob = typeof file.content === 'string'
       ? new Blob([file.content], { type: 'text/plain' })
       : file;
@@ -1319,13 +1522,24 @@ function App() {
       const res = await fetch('/api/upload', { method: 'POST', body: fd }).then(r => r.json());
       if (res.error) {
         toast(res.error, 'err');
+        // Drop the job — upload itself failed, indexing won't happen.
+        setIndexJobs(prev => prev.filter(j => j.id !== jobId));
         setStage('idle');
         return;
       }
       await refreshFiles();
-      toast(`stored ${file.filename} ✓`, 'ok');
+      toast(`stored ${file.filename} · indexing…`, 'ok');
+      // Seed total from the upload response so the bar shows X/Y immediately.
+      setIndexJobs(prev => prev.map(j => j.id === jobId ? {
+        ...j,
+        phase: 'indexing',
+        total: res.chunks ?? j.total,
+        // Reset startedAt so the 120s timeout is measured from the start of indexing.
+        startedAt: Date.now(),
+      } : j));
     } catch (e) {
       toast('upload failed: ' + e.message, 'err');
+      setIndexJobs(prev => prev.filter(j => j.id !== jobId));
     } finally {
       setStage('idle');
     }
@@ -1364,7 +1578,7 @@ function App() {
             filename: targetFile,
             score: 1,
             line: m.line_number,
-            snippetHtml: highlightTokens(m.line_text.slice(0, 200), tokens),
+            snippetHtml: highlightPhrase(m.line_text.slice(0, 200), query),
             chunkHandle: handle,
             serverIdx: sIdx,
           };
@@ -1439,7 +1653,7 @@ function App() {
   };
 
   const api = { upload, search, toast, selectFile: setSelectedFile, clearSearch };
-  const state = { files, stage, highlightServer, serverMatches, matchedHandles, results, lastQuery, latencyMs, selectedFile, sec, tweaks };
+  const state = { files, stage, highlightServer, serverMatches, matchedHandles, results, lastQuery, latencyMs, selectedFile, sec, tweaks, indexJobs };
   const totalChunks = files.reduce((a, f) => a + f.chunks.length, 0);
 
   return (

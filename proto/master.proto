@@ -22,6 +22,9 @@ service MasterService {
 
   //Client searches within a specific file for all lines matching a query
   rpc FileSearch (FileSearchRequest) returns (FileSearchResponse);
+
+  // Client polls indexing progress for a freshly uploaded file
+  rpc FileIndexStatus (FileIndexStatusRequest) returns (FileIndexStatusResponse);
 }
 
 // --- Upload ---
@@ -124,8 +127,22 @@ message FileSearchMatch {
   string line_text = 3;
 }
 
-message FileSearchResponse {                                                      
+message FileSearchResponse {
   bool success = 1;
-  string message = 2;                                                             
+  string message = 2;
   repeated FileSearchMatch matches = 3;
+}
+
+// --- File Index Status (upload-then-indexing progress) ---
+
+message FileIndexStatusRequest {
+  string filename = 1;
+}
+
+message FileIndexStatusResponse {
+  bool success = 1;
+  string message = 2;
+  int32 indexed_chunks = 3;
+  int32 total_chunks = 4;
+  bool done = 5;
 }

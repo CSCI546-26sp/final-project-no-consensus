@@ -21,7 +21,16 @@ def startTestServer():
     heartbeat_pb2_grpc.add_HeartbeatServiceServicer_to_server(chunkServer, server)
     server.add_insecure_port(f"0.0.0.0:{TEST_PORT}")
     server.start()
-    return server
+    return server, chunkServer
+
+
+def waitForIndex(chunkServer, chunkHandle, timeout=2.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if chunkHandle in chunkServer.ngramIndex.index:
+            return
+        time.sleep(0.05)
+    raise TimeoutError(f"chunk {chunkHandle} not indexed within {timeout}s")
 
 def writeChunkHelper(stub, chunkHandle, data):
     STREAM_SIZE = 512 * 1024
@@ -89,8 +98,78 @@ def testSearchNoResults(searchStub):
     assert len(response.matches) == 0, f"Expected 0 matches, got {len(response.matches)}"
     print("PASS: SearchChunks no results")
 
+
+def testNgramIndexBuiltOnWrite(chunkStub, chunkServer):
+    handle = "chunk-ngram-1"
+    writeChunkHelper(chunkStub, handle, b"the quick brown fox jumps over the lazy dog")
+    waitForIndex(chunkServer, handle)
+
+    candidates = chunkServer.ngramIndex.candidatePositions(handle, "brown")
+    assert candidates == [10], f"expected [10], got {candidates}"
+
+    assert chunkServer.ngramIndex.candidatePositions(handle, "zebra") == []
+    print("PASS: ngram index populated on WriteChunk")
+
+
+def testScanChunkUsesTrigramIndex(chunkStub, chunkServer):
+    handle = "chunk-scan-1"
+    text = b"line one has cat\nline two has dog\nline three has bird and cat\nfourth line"
+    writeChunkHelper(chunkStub, handle, text)
+    waitForIndex(chunkServer, handle)
+
+    response = chunkServer.ScanChunk(
+        heartbeat_pb2.ScanChunkRequest(chunk_handle=handle, query="cat"), context=None
+    )
+    lineNumbers = sorted(m.line_number for m in response.matches)
+    assert lineNumbers == [0, 2], f"expected lines [0, 2], got {lineNumbers}"
+    # one match per line, even when the term appears elsewhere on the same line
+    assert len(response.matches) == 2
+
+    # case-insensitive
+    response = chunkServer.ScanChunk(
+        heartbeat_pb2.ScanChunkRequest(chunk_handle=handle, query="CAT"), context=None
+    )
+    assert sorted(m.line_number for m in response.matches) == [0, 2]
+
+    # query that doesn't exist
+    response = chunkServer.ScanChunk(
+        heartbeat_pb2.ScanChunkRequest(chunk_handle=handle, query="zebra"), context=None
+    )
+    assert response.matches == []
+    print("PASS: ScanChunk uses trigram index for >=3 char queries")
+
+
+def testScanChunkShortQueryFallback(chunkStub, chunkServer):
+    handle = "chunk-scan-2"
+    writeChunkHelper(chunkStub, handle, b"the quick brown fox\nlazy dog at rest")
+    waitForIndex(chunkServer, handle)
+
+    # 2-char query bypasses trigram index, falls back to linear regex scan
+    response = chunkServer.ScanChunk(
+        heartbeat_pb2.ScanChunkRequest(chunk_handle=handle, query="at"), context=None
+    )
+    lineNumbers = sorted(m.line_number for m in response.matches)
+    # "at" appears in "lazy dog at rest" (line 1)
+    assert 1 in lineNumbers, f"expected line 1 in {lineNumbers}"
+    print("PASS: ScanChunk falls back to linear scan for short queries")
+
+
+def testNgramIndexEvictedOnDelete(chunkStub, chunkServer):
+    handle = "chunk-ngram-2"
+    writeChunkHelper(chunkStub, handle, b"alpha beta gamma delta")
+    waitForIndex(chunkServer, handle)
+    assert handle in chunkServer.ngramIndex.index
+
+    chunkServer.DeleteChunk(
+        heartbeat_pb2.DeleteChunkRequest(chunk_handle=handle), context=None
+    )
+    assert handle not in chunkServer.ngramIndex.index
+    assert handle not in chunkServer.index.chunkTerms
+    print("PASS: ngram index evicted on DeleteChunk")
+
+
 def main():
-    server = startTestServer()
+    server, chunkServer = startTestServer()
     time.sleep(0.5)
 
     channel = grpc.insecure_channel(f"localhost:{TEST_PORT}")
@@ -105,6 +184,10 @@ def main():
         testLargeChunk(chunkStub)
         testSearchChunks(searchStub, chunkStub)
         testSearchNoResults(searchStub)
+        testNgramIndexBuiltOnWrite(chunkStub, chunkServer)
+        testScanChunkUsesTrigramIndex(chunkStub, chunkServer)
+        testScanChunkShortQueryFallback(chunkStub, chunkServer)
+        testNgramIndexEvictedOnDelete(chunkStub, chunkServer)
         print("\n--- All Chunk Server tests passed ---\n")
     except AssertionError as e:
         print(f"\nTEST FAILED: {e}\n")

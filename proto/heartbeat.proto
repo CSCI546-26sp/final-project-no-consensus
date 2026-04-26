@@ -28,6 +28,7 @@ message HeartbeatRequest {
   int64 available_disk = 2;          // bytes of free disk space
   repeated string chunk_handles = 3; // all chunks this server holds
   int64 used_bytes = 4;              // bytes occupied by chunks on this server
+  repeated string indexed_chunk_handles = 5; // chunks the indexer has finished indexing
 }
 
 message HeartbeatResponse {

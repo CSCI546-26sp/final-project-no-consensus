@@ -1,5 +1,6 @@
 from typing import Iterator
 import argparse
+import bisect
 from concurrent.futures import ThreadPoolExecutor
 import threading
 import grpc
@@ -8,6 +9,7 @@ import re
 import queue
 
 from chunkserver.index import InvertedIndex
+from chunkserver.ngram import NGramIndex
 from chunkserver.store import ChunkStore
 from chunkserver.rwlock import RWLock
 
@@ -37,6 +39,7 @@ class ChunkServer(ChunkServerServiceServicer, HeartbeatServiceServicer):
         self.port = port
         self.store = ChunkStore(dataDir)
         self.index = InvertedIndex()
+        self.ngramIndex = NGramIndex()
         self.lock = RWLock()
 
         self.indexQueue: queue.Queue = queue.Queue()
@@ -52,6 +55,10 @@ class ChunkServer(ChunkServerServiceServicer, HeartbeatServiceServicer):
         return
     
     def _indexerLoop(self):
+        # Shared between all worker threads — fan out the two tokenize calls
+        # so the inverted-index regex (which releases the GIL) can overlap with
+        # the ngram tokenize loop on the same chunk.
+        tokenizePool = ThreadPoolExecutor(max_workers=2)
         while True:
             chunkHandle = self.indexQueue.get()
             if chunkHandle is None:
@@ -59,9 +66,13 @@ class ChunkServer(ChunkServerServiceServicer, HeartbeatServiceServicer):
             try:
                 data = self.store.readChunk(chunkHandle)
                 text = data.decode("utf-8", errors = "replace")
-                postings, lineBreaks = self.index.tokenizeChunk(chunkHandle, text)
+                invertedFuture = tokenizePool.submit(self.index.tokenizeChunk, chunkHandle, text)
+                ngramFuture = tokenizePool.submit(self.ngramIndex.tokenizeChunk, chunkHandle, text)
+                postings, lineBreaks = invertedFuture.result()
+                ngramTrigrams = ngramFuture.result()
                 with self.lock.writeLock():
                     self.index.mergeChunk(chunkHandle, postings, lineBreaks)
+                    self.ngramIndex.mergeChunk(chunkHandle, ngramTrigrams)
             except Exception as ex:
                 print(f"Indexer error for chunk {chunkHandle}: {ex}")
     
@@ -71,11 +82,14 @@ class ChunkServer(ChunkServerServiceServicer, HeartbeatServiceServicer):
         while True:
             time.sleep(HEARTBEAT_INTERVAL)
             try:
+                with self.lock.readLock():
+                    indexedHandles = list(self.index.chunkTerms.keys())
                 request = HeartbeatRequest(
                     server_id = self.serverId,
                     available_disk = self.store.getAvailableDisk(),
                     chunk_handles = self.store.listChunks(),
-                    used_bytes = self.store.getUsedBytes()
+                    used_bytes = self.store.getUsedBytes(),
+                    indexed_chunk_handles = indexedHandles,
                 )
                 stub.Heartbeat(request)
                 print(f"Heartbeat sent from server {self.serverId}")
@@ -241,8 +255,8 @@ class ChunkServer(ChunkServerServiceServicer, HeartbeatServiceServicer):
             self.store.deleteChunk(chunkHandle)
             return ReplicateChunkResponse(success = False, message = f"Replication error {ex}")
         
-    def ScanChunk(self, 
-                  request: ScanChunkRequest, 
+    def ScanChunk(self,
+                  request: ScanChunkRequest,
                   context: grpc.ServicerContext) -> ScanChunkResponse:
         chunkHandle = request.chunk_handle
         query = request.query
@@ -254,19 +268,54 @@ class ChunkServer(ChunkServerServiceServicer, HeartbeatServiceServicer):
                 context.set_code(grpc.StatusCode.NOT_FOUND)
                 context.set_details("Chunk does not exist")
                 return ScanChunkResponse()
-            
             data = self.store.readChunk(chunkHandle = chunkHandle)
+            candidates = self.ngramIndex.candidatePositions(chunkHandle, query)
 
         text = data.decode("utf-8", errors = "replace")
-        pattern = re.compile(re.escape(query), re.IGNORECASE)
 
+        if candidates is None:
+            return self._scanLinear(text, query)
+        if not candidates:
+            return ScanChunkResponse()
+        return self._scanByCandidates(text, query, candidates)
+
+    def _scanLinear(self, text: str, query: str) -> ScanChunkResponse:
+        pattern = re.compile(re.escape(query), re.IGNORECASE)
         matches = []
         for lineNumber, line in enumerate(text.splitlines()):
             if pattern.search(line):
-                matches.append(ScanMatch(
-                    line_number = lineNumber,
-                    line_text = line,
-                ))
+                matches.append(ScanMatch(line_number = lineNumber, line_text = line))
+        return ScanChunkResponse(matches = matches)
+
+    def _scanByCandidates(self, text: str, query: str, candidates: list) -> ScanChunkResponse:
+        # str.lower preserves length for all chars we care about; positions in
+        # `candidates` index into text directly.
+        lower = text.lower()
+        qlow = query.lower()
+        qlen = len(qlow)
+
+        linesWithEnds = text.splitlines(keepends = True)
+        lineStarts = []
+        offset = 0
+        for line in linesWithEnds:
+            lineStarts.append(offset)
+            offset += len(line)
+        lines = [line.rstrip("\r\n") for line in linesWithEnds]
+
+        matches = []
+        seenLines = set()
+        for p in candidates:
+            if p + qlen > len(lower) or lower[p:p + qlen] != qlow:
+                continue
+            lineNumber = bisect.bisect_right(lineStarts, p) - 1
+            if lineNumber in seenLines:
+                continue
+            seenLines.add(lineNumber)
+            matches.append(ScanMatch(
+                line_number = lineNumber,
+                line_text = lines[lineNumber],
+            ))
+        matches.sort(key = lambda m: m.line_number)
         return ScanChunkResponse(matches = matches)
 
     def DeleteChunk(self,
@@ -278,6 +327,7 @@ class ChunkServer(ChunkServerServiceServicer, HeartbeatServiceServicer):
                 return DeleteChunkResponse(success = True, message = "Chunk not present")
             self.store.deleteChunk(chunkHandle = chunkHandle)
             self.index.removeChunk(chunkHandle)
+            self.ngramIndex.removeChunk(chunkHandle)
         return DeleteChunkResponse(success = True, message = "Chunk deleted")
 
 

@@ -1,0 +1,93 @@
+Bench matrix: size=500MB, workers={1 4 8}
+Started at Sat Apr 25 17:03:52 PDT 2026
+INDEXER_WORKERS:
+INDEXER_WORKERS = 8
+PIPELINE_QUEUE_MAXSIZE:
+PIPELINE_QUEUE_MAXSIZE = 16
+
+=================================================
+  workers=1   size=500MB
+=================================================
+Synthesizing 500 MB of text...
+Source:   synthetic (500 MB)
+Size:     500.0 MB
+Filename: bench-500mb-1777161840.txt
+Mode:     direct
+
+master.UploadFile:    11 ms
+channel setup × 125:   total 20 ms   avg=0ms  min=0  p50=0  p95=0  max=0
+WriteChunk × 125 (per-thread): avg=589ms  min=44  p50=591  p95=819  max=1004
+Parallel section wall (1-way): 73.94s
+Direct upload total:  73.95s   throughput 6.8 MB/s
+
+Waiting for indexing...
+  indexed 119/125  (t=0.0s)
+  indexed 124/125  (t=2.1s)
+  indexed 125/125  (t=4.2s)
+Indexing:     4.20s   throughput 119.1 MB/s
+
+=== Total wall (upload→searchable):  78.15s ===
+Cleaned up bench-500mb-1777161840.txt
+
+=================================================
+  workers=4   size=500MB
+=================================================
+Synthesizing 500 MB of text...
+Source:   synthetic (500 MB)
+Size:     500.0 MB
+Filename: bench-500mb-1777161933.txt
+Mode:     direct
+
+master.UploadFile:    9 ms
+channel setup × 125:   total 19 ms   avg=0ms  min=0  p50=0  p95=0  max=0
+WriteChunk × 125 (per-thread): avg=2496ms  min=62  p50=2528  p95=3568  max=4864
+Parallel section wall (4-way): 79.88s
+Direct upload total:  79.89s   throughput 6.3 MB/s
+
+Waiting for indexing...
+  indexed 97/125  (t=0.0s)
+  indexed 102/125  (t=1.6s)
+  indexed 113/125  (t=2.6s)
+  indexed 114/125  (t=3.6s)
+  indexed 125/125  (t=7.7s)
+Indexing:     7.73s   throughput 64.7 MB/s
+
+=== Total wall (upload→searchable):  87.62s ===
+Cleaned up bench-500mb-1777161933.txt
+
+=================================================
+  workers=8   size=500MB
+=================================================
+Synthesizing 500 MB of text...
+Source:   synthetic (500 MB)
+Size:     500.0 MB
+Filename: bench-500mb-1777162035.txt
+Mode:     direct
+
+Traceback (most recent call last):
+  File "/Users/rajivmurali/Documents/CSCI 546 - Distributed Systems/project/codebase/scripts/bench_upload.py", line 243, in <module>
+    main()
+  File "/Users/rajivmurali/Documents/CSCI 546 - Distributed Systems/project/codebase/scripts/bench_upload.py", line 217, in main
+    masterTime, setupTimes, sendTimes, wallTime, chunks = benchmarkDirect(
+                                                          ^^^^^^^^^^^^^^^^
+  File "/Users/rajivmurali/Documents/CSCI 546 - Distributed Systems/project/codebase/scripts/bench_upload.py", line 131, in benchmarkDirect
+    results = list(ex.map(uploadOne, upRes.assignments))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/envs/dfs/lib/python3.11/concurrent/futures/_base.py", line 619, in result_iterator
+    yield _result_or_cancel(fs.pop())
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/envs/dfs/lib/python3.11/concurrent/futures/_base.py", line 317, in _result_or_cancel
+    return fut.result(timeout)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/envs/dfs/lib/python3.11/concurrent/futures/_base.py", line 456, in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/envs/dfs/lib/python3.11/concurrent/futures/_base.py", line 401, in __get_result
+    raise self._exception
+  File "/opt/anaconda3/envs/dfs/lib/python3.11/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rajivmurali/Documents/CSCI 546 - Distributed Systems/project/codebase/scripts/bench_upload.py", line 126, in uploadOne
+    raise RuntimeError(f"Chunk {chunkIndex} write failed: {wresp.message}")
+RuntimeError: Chunk 52 write failed: Replica forwarding failed: Forward RPC error: recvmsg:Connection reset by peer
+
