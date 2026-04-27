@@ -583,7 +583,7 @@ button, input, select, textarea { font-family: inherit; }
   display: block; margin-bottom: 12px;
 }
 
-.result-item { padding: 14px 20px; border-bottom: 1px solid var(--line); cursor: pointer; transition: background 0.1s ease; }
+.result-item { padding: 14px 20px; border-bottom: 1px solid var(--line); cursor: pointer; transition: background 0.1s ease; box-sizing: border-box; }
 .result-item:hover { background: var(--bg-2); }
 .result-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
 .result-filename { font-size: 13.5px; font-weight: 500; color: var(--ink-0); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1174,11 +1174,142 @@ const SEARCH_MODES = [
   { id: 'file',    label: 'Single file — one target' },
 ];
 
+/* Variable-height virtualized list. Each row is rendered in natural flow,
+   measured via ResizeObserver, and its height cached. Cumulative offsets
+   are recomputed only when a measured height changes. Binary search picks
+   the visible window. DOM stays bounded to ~viewport rows, but rows can be
+   any size (multi-line snippets etc.). */
+const VIRTUAL_OVERSCAN = 4;
+const VIRTUAL_ROW_ESTIMATE = 130;
+
+function MeasuredRow({ index, top, onMeasure, children }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const report = () => onMeasure(index, el.offsetHeight);
+    report();
+    const ro = new ResizeObserver(report);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [index, onMeasure]);
+  return (
+    <div ref={ref} style={{ position: 'absolute', top, left: 0, right: 0 }}>
+      {children}
+    </div>
+  );
+}
+
+const VirtualResults = React.memo(function VirtualResults({ results, scrollRef, renderRow }) {
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(600);
+  const [version, setVersion] = useState(0);
+
+  // Per-row measured heights (mutable across renders). Reset when the
+  // results array length changes — different search, different rows.
+  const heightsRef = useRef([]);
+  if (heightsRef.current.length !== results.length) {
+    heightsRef.current = new Array(results.length).fill(VIRTUAL_ROW_ESTIMATE);
+  }
+
+  // rAF-throttled scroll/resize updates
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    let pending = false;
+    const flush = () => {
+      pending = false;
+      setScrollTop(el.scrollTop);
+      setViewportHeight(el.clientHeight);
+    };
+    const schedule = () => {
+      if (pending) return;
+      pending = true;
+      requestAnimationFrame(flush);
+    };
+    flush();
+    el.addEventListener('scroll', schedule, { passive: true });
+    const ro = new ResizeObserver(schedule);
+    ro.observe(el);
+    return () => {
+      el.removeEventListener('scroll', schedule);
+      ro.disconnect();
+    };
+  }, [scrollRef]);
+
+  // Cumulative offsets: offsets[i] = top of row i. offsets[N] = total height.
+  // Rebuilt only when results, version (height changes), or estimate change.
+  const offsets = useMemo(() => {
+    const heights = heightsRef.current;
+    const out = new Array(results.length + 1);
+    out[0] = 0;
+    for (let i = 0; i < results.length; i++) {
+      out[i + 1] = out[i] + heights[i];
+    }
+    return out;
+  }, [results.length, version]);
+
+  const totalHeight = offsets[results.length];
+
+  // Binary search: smallest index whose cumulative *bottom* edge > offset.
+  const findRowAt = (offset) => {
+    let lo = 0, hi = results.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (offsets[mid + 1] <= offset) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  };
+
+  const startIdx = Math.max(0, findRowAt(scrollTop) - VIRTUAL_OVERSCAN);
+  const endIdx = Math.min(results.length, findRowAt(scrollTop + viewportHeight) + 1 + VIRTUAL_OVERSCAN);
+
+  const onMeasure = useCallback((i, h) => {
+    if (heightsRef.current[i] === h) return;
+    heightsRef.current[i] = h;
+    setVersion(v => v + 1);
+  }, []);
+
+  const visible = [];
+  for (let i = startIdx; i < endIdx; i++) {
+    visible.push(
+      <MeasuredRow key={i} index={i} top={offsets[i]} onMeasure={onMeasure}>
+        {renderRow(results[i], i)}
+      </MeasuredRow>
+    );
+  }
+  return (
+    <div style={{ height: totalHeight, position: 'relative' }}>
+      {visible}
+    </div>
+  );
+});
+
 function RightPanel({ state, api }) {
   const [q, setQ] = useState('');
   const [mode, setMode] = useState('all');
   const [fileSel, setFileSel] = useState('');
   const inputRef = useRef();
+  const resultsScrollRef = useRef(null);
+
+  const renderResultRow = useCallback((r, i) => (
+    <div className="result-item" onClick={() => api.selectFile(r.filename)}>
+      <div className="result-head">
+        <div className="result-filename">{r.filename}</div>
+        <div className="result-score">{r.score.toFixed(3)}</div>
+      </div>
+      <div className="result-snippet" dangerouslySetInnerHTML={{ __html: r.snippetHtml }} />
+      <div className="result-meta">
+        <span>line {r.line}</span><span>·</span>
+        <span>chunk <span style={{ color: 'var(--ink-1)' }}>{r.chunkHandle}</span></span><span>·</span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+          <span className={'dot-c ' + COLORS[r.serverIdx]}></span>
+          {SERVER_POS[r.serverIdx].name}
+        </span>
+      </div>
+    </div>
+  ), [api]);
 
   useEffect(() => {
     const onKey = (e) => {
@@ -1267,7 +1398,7 @@ function RightPanel({ state, api }) {
         </div>
       )}
 
-      <div className="results">
+      <div className="results" ref={resultsScrollRef}>
         {!state.lastQuery && state.stage !== 'searching' && (
           <div className="result-empty">
             <span className="big-num">&lt; 1 ms</span>
@@ -1284,23 +1415,13 @@ function RightPanel({ state, api }) {
         {state.stage !== 'searching' && state.lastQuery && state.results.length === 0 && (
           <div className="result-empty">no postings matched <code style={{ color: 'var(--ink-0)' }}>{state.lastQuery}</code></div>
         )}
-        {state.results.map((r, i) => (
-          <div key={i} className="result-item" onClick={() => api.selectFile(r.filename)}>
-            <div className="result-head">
-              <div className="result-filename">{r.filename}</div>
-              <div className="result-score">{r.score.toFixed(3)}</div>
-            </div>
-            <div className="result-snippet" dangerouslySetInnerHTML={{ __html: r.snippetHtml }} />
-            <div className="result-meta">
-              <span>line {r.line}</span><span>·</span>
-              <span>chunk <span style={{ color: 'var(--ink-1)' }}>{r.chunkHandle}</span></span><span>·</span>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                <span className={'dot-c ' + COLORS[r.serverIdx]}></span>
-                {SERVER_POS[r.serverIdx].name}
-              </span>
-            </div>
-          </div>
-        ))}
+        {state.results.length > 0 && (
+          <VirtualResults
+            results={state.results}
+            scrollRef={resultsScrollRef}
+            renderRow={renderResultRow}
+          />
+        )}
       </div>
     </div>
   );
@@ -1578,7 +1699,7 @@ function App() {
             filename: targetFile,
             score: 1,
             line: m.line_number,
-            snippetHtml: highlightPhrase(m.line_text.slice(0, 200), query),
+            snippetHtml: highlightPhrase(m.line_text.slice(0, 400), query),
             chunkHandle: handle,
             serverIdx: sIdx,
           };
