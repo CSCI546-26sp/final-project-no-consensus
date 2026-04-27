@@ -7,7 +7,7 @@ import grpc
 from concurrent.futures import ThreadPoolExecutor
 
 from common.config import CHUNK_SERVER_PORTS, CHUNK_SIZE, MASTER_PORT, REPLICATION_FACTOR, HEARTBEAT_INTERVAL, HEARTBEAT_MISS_LIMIT
-from common.config import GC_INTERVAL, GC_THRESHOLD
+from common.config import GC_INTERVAL, GC_THRESHOLD, GRPC_OPTIONS
 from proto.master_pb2_grpc import MasterServiceServicer
 from proto.heartbeat_pb2 import ChunkMatch
 from proto.heartbeat_pb2_grpc import HeartbeatServiceServicer, HeartbeatServiceStub
@@ -289,7 +289,7 @@ class MasterServer(MasterServiceServicer, HeartbeatServiceServicer):
 
     def _scanFanOut(self, serverAddress: str, chunkHandle: str, query: str):
         try:
-            channel = grpc.insecure_channel(serverAddress)
+            channel = grpc.insecure_channel(serverAddress, options=GRPC_OPTIONS)
             stub = HeartbeatServiceStub(channel)
             response = stub.ScanChunk(heartbeat_pb2.ScanChunkRequest(
                 chunk_handle = chunkHandle,
@@ -301,7 +301,7 @@ class MasterServer(MasterServiceServicer, HeartbeatServiceServicer):
 
     def _fanOut(self, serverAddress: str, request: master_pb2.SearchFilesRequest):
         try:
-            channel = grpc.insecure_channel(serverAddress)
+            channel = grpc.insecure_channel(serverAddress, options=GRPC_OPTIONS)
             stub = HeartbeatServiceStub(channel)
             response = stub.SearchChunks(heartbeat_pb2.SearchChunksRequest(query=request.query))
             return response.matches
@@ -367,7 +367,7 @@ class MasterServer(MasterServiceServicer, HeartbeatServiceServicer):
                 sourceAddress = f"dfs-chunk{sourceId}:{CHUNK_SERVER_PORTS[sourceId]}"
                 targetAddress = f"dfs-chunk{targetId}:{CHUNK_SERVER_PORTS[targetId]}"
                 try:
-                    channel = grpc.insecure_channel(targetAddress)
+                    channel = grpc.insecure_channel(targetAddress, options=GRPC_OPTIONS)
                     stub = HeartbeatServiceStub(channel)
                     stub.ReplicateChunk(heartbeat_pb2.ReplicateChunkRequest(
                         chunk_handle = chunkHandle, 
@@ -405,14 +405,14 @@ class MasterServer(MasterServiceServicer, HeartbeatServiceServicer):
             for (chunkHandle, sid) in deleteTasks:
                 address = f"dfs-chunk{sid}:{CHUNK_SERVER_PORTS[sid]}"
                 try:
-                    channel = grpc.insecure_channel(address)
+                    channel = grpc.insecure_channel(address, options=GRPC_OPTIONS)
                     stub = HeartbeatServiceStub(channel)
                     stub.DeleteChunk(heartbeat_pb2.DeleteChunkRequest(chunk_handle = chunkHandle))
                 except grpc.RpcError as error:
                     print(f"DeleteChunk failed for {chunkHandle} on server {sid}: {error.details()}")
 
 def serve():
-    server = grpc.server(ThreadPoolExecutor(max_workers= 10))
+    server = grpc.server(ThreadPoolExecutor(max_workers= 10), options=GRPC_OPTIONS)
     master = MasterServer()
     master_pb2_grpc.add_MasterServiceServicer_to_server(master, server)
     heartbeat_pb2_grpc.add_HeartbeatServiceServicer_to_server(master, server)

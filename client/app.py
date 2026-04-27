@@ -11,7 +11,7 @@ from io import BytesIO
 from threading import Semaphore
 from flask import Flask, render_template, request, jsonify, send_file
 
-from common.config import CHUNK_SIZE
+from common.config import CHUNK_SIZE, GRPC_OPTIONS
 from proto import master_pb2, master_pb2_grpc, chunkserver_pb2, chunkserver_pb2_grpc
 from proto.master_pb2_grpc import MasterServiceStub
 
@@ -28,7 +28,7 @@ def translateAddress(dockerAddress: str) -> str:
 
 
 def getMasterStub():
-    channel = grpc.insecure_channel(MASTER_ADDRESS)
+    channel = grpc.insecure_channel(MASTER_ADDRESS, options=GRPC_OPTIONS)
     return MasterServiceStub(channel)
 
 
@@ -109,7 +109,7 @@ def apiUpload():
         primaryAddress = translateAddress(addresses[0])
         forwardAddresses = addresses[1:]
 
-        chunkChannel = grpc.insecure_channel(primaryAddress)
+        chunkChannel = grpc.insecure_channel(primaryAddress, options=GRPC_OPTIONS)
         chunkStub = chunkserver_pb2_grpc.ChunkServerServiceStub(chunkChannel)
 
         def iterator():
@@ -176,7 +176,7 @@ def apiDownload(filename):
 
     for location in locations:
         address = translateAddress(location.server_addresses[0])
-        chunkChannel = grpc.insecure_channel(address)
+        chunkChannel = grpc.insecure_channel(address, options=GRPC_OPTIONS)
         chunkStub = chunkserver_pb2_grpc.ChunkServerServiceStub(chunkChannel)
         try:
             for readResponse in chunkStub.ReadChunk(

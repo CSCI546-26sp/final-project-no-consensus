@@ -13,8 +13,16 @@ CHUNK_SERVER_PORTS = {
 CHUNK_SIZE = 4 * 1024 * 1024  # 4 MB in bytes
 PIPELINE_QUEUE_MAXSIZE = 16
 
+# gRPC message size cap. Default is 4 MB; raised to 40 MB for aggregated search
+# responses (FileSearch fans out across many chunks, response can grow large).
+GRPC_MAX_MESSAGE_BYTES = 40 * 1024 * 1024
+GRPC_OPTIONS = [
+    ("grpc.max_send_message_length", GRPC_MAX_MESSAGE_BYTES),
+    ("grpc.max_receive_message_length", GRPC_MAX_MESSAGE_BYTES),
+]
+
 # Replication
-REPLICATION_FACTOR = 2
+REPLICATION_FACTOR = 1
 
 # Heartbeat
 HEARTBEAT_INTERVAL = 5      # seconds between heartbeats

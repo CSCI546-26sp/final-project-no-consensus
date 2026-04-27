@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import grpc
 import requests
 
-from common.config import CHUNK_SIZE
+from common.config import CHUNK_SIZE, GRPC_OPTIONS
 from proto import master_pb2, master_pb2_grpc, chunkserver_pb2, chunkserver_pb2_grpc
 
 
@@ -85,7 +85,7 @@ def benchmarkDirect(filename, data, workers):
     (each thread times its own RPC) but the *wall* time of the parallel section
     is what determines real throughput.
     """
-    masterChan = grpc.insecure_channel(MASTER_ADDRESS)
+    masterChan = grpc.insecure_channel(MASTER_ADDRESS, options=GRPC_OPTIONS)
     masterStub = master_pb2_grpc.MasterServiceStub(masterChan)
 
     t0 = time.perf_counter()
@@ -106,7 +106,7 @@ def benchmarkDirect(filename, data, workers):
         forwards = addresses[1:]
 
         t1 = time.perf_counter()
-        chan = grpc.insecure_channel(primary)
+        chan = grpc.insecure_channel(primary, options=GRPC_OPTIONS)
         stub = chunkserver_pb2_grpc.ChunkServerServiceStub(chan)
         setupT = time.perf_counter() - t1
 

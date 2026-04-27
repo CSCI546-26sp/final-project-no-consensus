@@ -13,7 +13,7 @@ from chunkserver.ngram import NGramIndex
 from chunkserver.store import ChunkStore
 from chunkserver.rwlock import RWLock
 
-from common.config import HEARTBEAT_INTERVAL, MASTER_HOST, MASTER_PORT, PIPELINE_QUEUE_MAXSIZE, INDEXER_WORKERS
+from common.config import HEARTBEAT_INTERVAL, MASTER_HOST, MASTER_PORT, PIPELINE_QUEUE_MAXSIZE, INDEXER_WORKERS, GRPC_OPTIONS
 
 from proto.chunkserver_pb2_grpc import ChunkServerServiceServicer, add_ChunkServerServiceServicer_to_server, ChunkServerServiceStub
 from proto.heartbeat_pb2_grpc import HeartbeatServiceServicer, HeartbeatServiceStub, add_HeartbeatServiceServicer_to_server
@@ -77,7 +77,7 @@ class ChunkServer(ChunkServerServiceServicer, HeartbeatServiceServicer):
                 print(f"Indexer error for chunk {chunkHandle}: {ex}")
     
     def _sendHeartbeats(self):
-        channel = grpc.insecure_channel(f"{MASTER_HOST}:{MASTER_PORT}")
+        channel = grpc.insecure_channel(f"{MASTER_HOST}:{MASTER_PORT}", options=GRPC_OPTIONS)
         stub = HeartbeatServiceStub(channel)
         while True:
             time.sleep(HEARTBEAT_INTERVAL)
@@ -125,7 +125,7 @@ class ChunkServer(ChunkServerServiceServicer, HeartbeatServiceServicer):
         
         def forwardWorker(nextAddress: str, handle: str, remainingForwards: list):
             try:
-                channel = grpc.insecure_channel(nextAddress)
+                channel = grpc.insecure_channel(nextAddress, options=GRPC_OPTIONS)
                 stub = ChunkServerServiceStub(channel)
                 def wIterator():
                     while True:
@@ -237,7 +237,7 @@ class ChunkServer(ChunkServerServiceServicer, HeartbeatServiceServicer):
         chunkHandle = request.chunk_handle
         path = self.store.getChunkPath(chunkHandle)
         try:
-            channel = grpc.insecure_channel(request.source_address)
+            channel = grpc.insecure_channel(request.source_address, options=GRPC_OPTIONS)
             stub = ChunkServerServiceStub(channel)
             with open(path, "wb") as f:
                 for response in stub.ReadChunk(
@@ -340,7 +340,7 @@ def serve():
     dataDir = f"/app/data"
     chunkServer = ChunkServer(serverId = args.id, port = args.port, dataDir = dataDir)
 
-    server = grpc.server(ThreadPoolExecutor(max_workers = 10))
+    server = grpc.server(ThreadPoolExecutor(max_workers = 10), options=GRPC_OPTIONS)
     add_ChunkServerServiceServicer_to_server(chunkServer, server)
     add_HeartbeatServiceServicer_to_server(chunkServer, server)
 

@@ -3,7 +3,7 @@ import grpc
 import os
 from concurrent.futures import ThreadPoolExecutor
 
-from common.config import CHUNK_SIZE
+from common.config import CHUNK_SIZE, GRPC_OPTIONS
 from proto import master_pb2, master_pb2_grpc, chunkserver_pb2, chunkserver_pb2_grpc
 from proto.master_pb2_grpc import MasterServiceStub
 
@@ -33,7 +33,7 @@ def upload(filepath, name):
     with open(filepath, 'rb') as file:
         dataBytes = file.read()
 
-    channel = grpc.insecure_channel(MASTER_ADDRESS)
+    channel = grpc.insecure_channel(MASTER_ADDRESS, options=GRPC_OPTIONS)
     stub = MasterServiceStub(channel)
     try:
         response: master_pb2.UploadFileResponse = stub.UploadFile(
@@ -55,7 +55,7 @@ def upload(filepath, name):
         primaryAddress = translateAddress(addresses[0])
         forwardAddresses = addresses[1:]
 
-        chunkChannel = grpc.insecure_channel(primaryAddress)
+        chunkChannel = grpc.insecure_channel(primaryAddress, options=GRPC_OPTIONS)
         chunkStub = chunkserver_pb2_grpc.ChunkServerServiceStub(chunkChannel)
 
         def makeIterator():
@@ -86,7 +86,7 @@ def upload(filepath, name):
 def download(filename, output):
     if output is None:
         output = filename
-    channel = grpc.insecure_channel(MASTER_ADDRESS)
+    channel = grpc.insecure_channel(MASTER_ADDRESS, options=GRPC_OPTIONS)
     masterStub = MasterServiceStub(channel)
 
     try:
@@ -102,7 +102,7 @@ def download(filename, output):
 
     for location in locations:
         address = translateAddress(location.server_addresses[0])
-        chunkChannel = grpc.insecure_channel(address)
+        chunkChannel = grpc.insecure_channel(address, options=GRPC_OPTIONS)
         chunkStub = chunkserver_pb2_grpc.ChunkServerServiceStub(chunkChannel)
         try:
             for readResponse in chunkStub.ReadChunk(
@@ -120,7 +120,7 @@ def download(filename, output):
 
 @cli.command("list")
 def listFiles():
-    channel = grpc.insecure_channel(MASTER_ADDRESS)
+    channel = grpc.insecure_channel(MASTER_ADDRESS, options=GRPC_OPTIONS)
     stub = MasterServiceStub(channel)
 
     try:
@@ -141,7 +141,7 @@ def listFiles():
 @cli.command()
 @click.argument("filename")
 def delete(filename):
-    channel = grpc.insecure_channel(MASTER_ADDRESS)
+    channel = grpc.insecure_channel(MASTER_ADDRESS, options=GRPC_OPTIONS)
     stub = MasterServiceStub(channel)
     try:
         response = stub.DeleteFile(master_pb2.DeleteFileRequest(filename = filename))
@@ -153,7 +153,7 @@ def delete(filename):
 @cli.command()
 @click.argument("query")
 def search(query):
-    channel = grpc.insecure_channel(MASTER_ADDRESS)
+    channel = grpc.insecure_channel(MASTER_ADDRESS, options=GRPC_OPTIONS)
     stub = MasterServiceStub(channel)
     try:
         response = stub.SearchFiles(master_pb2.SearchFilesRequest(query = query))
@@ -174,7 +174,7 @@ def search(query):
 @click.argument("filename")
 @click.argument("query")
 def filesearch(filename, query):
-    channel = grpc.insecure_channel(MASTER_ADDRESS)
+    channel = grpc.insecure_channel(MASTER_ADDRESS, options=GRPC_OPTIONS)
     stub = MasterServiceStub(channel)
     try:
         response = stub.FileSearch(
