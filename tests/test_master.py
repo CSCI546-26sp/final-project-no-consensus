@@ -120,6 +120,60 @@ def testDownloadAfterDelete(masterStub):
             f"Expected NOT_FOUND, got {e.code()}"
     print("PASS: DownloadFile after delete rejected")
 
+def testListDeletedFiles(masterStub):
+    response = masterStub.ListDeletedFiles(master_pb2.ListDeletedFilesRequest())
+    assert len(response.files) == 1, f"Expected 1 deleted file, got {len(response.files)}"
+    entry = response.files[0]
+    assert entry.display_name == "test.txt", f"Expected display_name 'test.txt', got '{entry.display_name}'"
+    assert entry.internal_name.startswith("._deleted_"), \
+        f"Expected internal_name to start with ._deleted_, got '{entry.internal_name}'"
+    assert entry.deleted_at_unix > 0, "deleted_at_unix should be set"
+    assert entry.seconds_until_gc >= 0, "seconds_until_gc should be non-negative"
+    print(f"PASS: ListDeletedFiles - {entry.display_name} ({entry.internal_name})")
+    return entry.internal_name
+
+def testRecoverFile(masterStub, internalName):
+    response = masterStub.RecoverFile(master_pb2.RecoverFileRequest(filename=internalName))
+    assert response.success == True, f"RecoverFile should succeed, got {response.message}"
+    assert response.restored_filename == "test.txt", \
+        f"Expected restored_filename 'test.txt', got '{response.restored_filename}'"
+    print("PASS: RecoverFile - file restored")
+
+def testListAfterRecover(masterStub):
+    response = masterStub.ListFiles(master_pb2.ListFilesRequest())
+    assert len(response.files) == 1, f"Expected 1 file after recover, got {len(response.files)}"
+    assert response.files[0].filename == "test.txt"
+    deletedResponse = masterStub.ListDeletedFiles(master_pb2.ListDeletedFilesRequest())
+    assert len(deletedResponse.files) == 0, \
+        f"Expected 0 deleted files after recover, got {len(deletedResponse.files)}"
+    print("PASS: ListFiles after recover - 1 file, 0 deleted")
+
+def testRecoverConflict(masterStub):
+    # Re-delete to set up a deleted entry
+    masterStub.DeleteFile(master_pb2.DeleteFileRequest(filename="test.txt"))
+    # Upload a new live file with the same original name
+    masterStub.UploadFile(master_pb2.UploadFileRequest(filename="test.txt", file_size=1024))
+    # Find the deleted internal name
+    deletedResponse = masterStub.ListDeletedFiles(master_pb2.ListDeletedFilesRequest())
+    assert len(deletedResponse.files) == 1
+    internalName = deletedResponse.files[0].internal_name
+    try:
+        masterStub.RecoverFile(master_pb2.RecoverFileRequest(filename=internalName))
+        assert False, "Should have raised ALREADY_EXISTS"
+    except grpc.RpcError as e:
+        assert e.code() == grpc.StatusCode.ALREADY_EXISTS, \
+            f"Expected ALREADY_EXISTS, got {e.code()}"
+    print("PASS: RecoverFile name-conflict rejected")
+
+def testRecoverNotFound(masterStub):
+    try:
+        masterStub.RecoverFile(master_pb2.RecoverFileRequest(filename="._deleted_0_nope.txt"))
+        assert False, "Should have raised NOT_FOUND"
+    except grpc.RpcError as e:
+        assert e.code() == grpc.StatusCode.NOT_FOUND, \
+            f"Expected NOT_FOUND, got {e.code()}"
+    print("PASS: RecoverFile not-found rejected")
+
 def main():
     server = startTestServer()
     time.sleep(0.5)  # let server start
@@ -140,6 +194,11 @@ def main():
         testDeleteFile(masterStub)
         testListFiles(masterStub, 0, "after delete")
         testDownloadAfterDelete(masterStub)
+        internalName = testListDeletedFiles(masterStub)
+        testRecoverFile(masterStub, internalName)
+        testListAfterRecover(masterStub)
+        testRecoverConflict(masterStub)
+        testRecoverNotFound(masterStub)
 
         print("\n--- All tests passed ---\n")
     except AssertionError as e:

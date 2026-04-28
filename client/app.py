@@ -209,6 +209,48 @@ def apiDeleteFile(filename):
     return jsonify({"message": f"Deleted '{filename}'"})
 
 
+@app.route("/api/files/deleted")
+def apiListDeleted():
+    try:
+        stub = getMasterStub()
+        response = stub.ListDeletedFiles(master_pb2.ListDeletedFilesRequest())
+    except grpc.RpcError as e:
+        return jsonify({"error": e.details()}), 500
+
+    files = []
+    for f in response.files:
+        files.append({
+            "internal_name": f.internal_name,
+            "display_name": f.display_name,
+            "file_size": f.file_size,
+            "file_size_human": formatSize(f.file_size),
+            "deleted_at_unix": f.deleted_at_unix,
+            "seconds_until_gc": f.seconds_until_gc,
+        })
+    return jsonify(files)
+
+
+@app.route("/api/files/<path:filename>/recover", methods=["POST"])
+def apiRecoverFile(filename):
+    try:
+        stub = getMasterStub()
+        response = stub.RecoverFile(
+            master_pb2.RecoverFileRequest(filename=filename)
+        )
+    except grpc.RpcError as e:
+        code = e.code()
+        status = 409 if code == grpc.StatusCode.ALREADY_EXISTS else 404 if code == grpc.StatusCode.NOT_FOUND else 500
+        return jsonify({"error": e.details()}), status
+
+    if not response.success:
+        return jsonify({"error": response.message}), 400
+
+    return jsonify({
+        "message": f"Recovered '{response.restored_filename}'",
+        "restored_filename": response.restored_filename,
+    })
+
+
 @app.route("/api/search")
 def apiSearch():
     query = request.args.get("q", "").strip()

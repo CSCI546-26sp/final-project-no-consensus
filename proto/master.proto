@@ -25,6 +25,12 @@ service MasterService {
 
   // Client polls indexing progress for a freshly uploaded file
   rpc FileIndexStatus (FileIndexStatusRequest) returns (FileIndexStatusResponse);
+
+  // Recover a soft-deleted file by its internal (._deleted_<ts>_<orig>) name.
+  rpc RecoverFile (RecoverFileRequest) returns (RecoverFileResponse);
+
+  // List files currently soft-deleted (pending GC).
+  rpc ListDeletedFiles (ListDeletedFilesRequest) returns (ListDeletedFilesResponse);
 }
 
 // --- Upload ---
@@ -145,4 +151,32 @@ message FileIndexStatusResponse {
   int32 indexed_chunks = 3;
   int32 total_chunks = 4;
   bool done = 5;
+}
+
+// --- Recover ---
+
+message RecoverFileRequest {
+  string filename = 1;  // internal name: ._deleted_<ts>_<orig>
+}
+
+message RecoverFileResponse {
+  bool success = 1;
+  string message = 2;
+  string restored_filename = 3;
+}
+
+// --- List deleted ---
+
+message ListDeletedFilesRequest {}
+
+message DeletedFileInfo {
+  string internal_name = 1;     // ._deleted_<ts>_<orig>
+  string display_name = 2;      // original filename
+  int64  file_size = 3;
+  double deleted_at_unix = 4;
+  double seconds_until_gc = 5;  // negative if past threshold
+}
+
+message ListDeletedFilesResponse {
+  repeated DeletedFileInfo files = 1;
 }

@@ -15,6 +15,8 @@ from proto import master_pb2, heartbeat_pb2, master_pb2_grpc, heartbeat_pb2_grpc
 
 from proto.master_pb2 import FileSearchRequest, FileSearchResponse, FileSearchMatch
 from proto.master_pb2 import FileIndexStatusRequest, FileIndexStatusResponse
+from proto.master_pb2 import RecoverFileRequest, RecoverFileResponse
+from proto.master_pb2 import ListDeletedFilesRequest, ListDeletedFilesResponse, DeletedFileInfo
 
 class FileMetaData:
     filename: str
@@ -149,7 +151,78 @@ class MasterServer(MasterServiceServicer, HeartbeatServiceServicer):
 
             self.deletedFiles[hiddenName] = time.time()
             return master_pb2.DeleteFileResponse(success = True, message = "File marked for deletion")
-    
+
+    def _parseDeletedName(self, internalName: str):
+        """Returns (originalName, deletedAtUnix) or None if not a soft-deleted name."""
+        prefix = "._deleted_"
+        if not internalName.startswith(prefix):
+            return None
+        rest = internalName[len(prefix):]
+        sep = rest.find("_")
+        if sep < 0:
+            return None
+        try:
+            ts = float(rest[:sep])
+        except ValueError:
+            return None
+        return rest[sep + 1:], ts
+
+    def RecoverFile(self,
+                    request: RecoverFileRequest, context) -> RecoverFileResponse:
+        with self.lock:
+            internalName = request.filename
+            if internalName not in self.deletedFiles or internalName not in self.namespace:
+                context.set_code(grpc.StatusCode.NOT_FOUND)
+                context.set_details("Deleted file not found")
+                return RecoverFileResponse(success=False, message="Deleted file not found")
+
+            parsed = self._parseDeletedName(internalName)
+            if parsed is None:
+                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                context.set_details("Malformed deleted-file name")
+                return RecoverFileResponse(success=False, message="Malformed deleted-file name")
+            originalName, _ts = parsed
+
+            if originalName in self.namespace:
+                context.set_code(grpc.StatusCode.ALREADY_EXISTS)
+                context.set_details(f"A live file named '{originalName}' already exists")
+                return RecoverFileResponse(
+                    success=False,
+                    message=f"A live file named '{originalName}' already exists",
+                )
+
+            meta = self.namespace.pop(internalName)
+            meta.filename = originalName
+            self.namespace[originalName] = meta
+            self.fileToChunks[originalName] = self.fileToChunks.pop(internalName)
+            del self.deletedFiles[internalName]
+            return RecoverFileResponse(
+                success=True,
+                message="File recovered",
+                restored_filename=originalName,
+            )
+
+    def ListDeletedFiles(self,
+                         request: ListDeletedFilesRequest, context) -> ListDeletedFilesResponse:
+        with self.lock:
+            now = time.time()
+            entries = []
+            for internalName, deletedAt in self.deletedFiles.items():
+                meta = self.namespace.get(internalName)
+                if meta is None:
+                    continue
+                parsed = self._parseDeletedName(internalName)
+                displayName = parsed[0] if parsed else internalName
+                entries.append(DeletedFileInfo(
+                    internal_name=internalName,
+                    display_name=displayName,
+                    file_size=meta.filesize,
+                    deleted_at_unix=deletedAt,
+                    seconds_until_gc=max(0.0, GC_THRESHOLD - (now - deletedAt)),
+                ))
+            entries.sort(key=lambda e: e.deleted_at_unix, reverse=True)
+            return ListDeletedFilesResponse(files=entries)
+
     def ListFiles(self, request: master_pb2.ListFilesRequest, context) -> master_pb2.ListFilesResponse:
         with self.lock:
             files = []

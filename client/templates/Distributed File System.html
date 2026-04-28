@@ -152,6 +152,142 @@ button, input, select, textarea { font-family: inherit; }
 .chunk-pill.s1 { background: oklch(0.78 0.17 155); }
 .chunk-pill.s2 { background: oklch(0.78 0.17 45); }
 
+/* Swipe-to-action row */
+.swipe-wrap {
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 2px;
+  /* contain animation when collapsing */
+  transition: max-height 0.28s ease, opacity 0.28s ease, margin 0.28s ease;
+  max-height: 80px;
+  opacity: 1;
+}
+.swipe-wrap.removing {
+  max-height: 0 !important;
+  opacity: 0 !important;
+  margin-bottom: 0 !important;
+  pointer-events: none;
+}
+.swipe-action {
+  position: absolute;
+  top: 0; right: 0; bottom: 0;
+  width: 78px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  user-select: none;
+}
+.swipe-action.delete {
+  background: linear-gradient(180deg, oklch(0.55 0.20 25), oklch(0.45 0.20 25));
+  color: #fff;
+}
+.swipe-action.recover {
+  background: linear-gradient(180deg, oklch(0.62 0.17 155), oklch(0.50 0.17 155));
+  color: #07101e;
+}
+.swipe-action:hover { filter: brightness(1.08); }
+.swipe-action svg { width: 16px; height: 16px; }
+.swipe-action .lbl { margin-left: 6px; }
+.swipe-foreground {
+  position: relative;
+  background: var(--bg-1);
+  transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+  will-change: transform;
+  touch-action: pan-y;
+}
+.swipe-foreground.dragging {
+  transition: none;
+}
+.swipe-hint {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-3);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  pointer-events: none;
+}
+.swipe-wrap:hover .swipe-hint { opacity: 0.6; }
+.swipe-wrap.open .swipe-hint { opacity: 0; }
+
+/* Pane selector dropdown */
+.pane-select {
+  position: relative;
+  margin: 0 0 12px;
+}
+.pane-select-button {
+  width: 100%;
+  display: flex; align-items: center; justify-content: space-between;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  color: var(--ink-0);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  transition: background 0.1s ease, border-color 0.1s ease;
+}
+.pane-select-button:hover { background: var(--bg-3); border-color: var(--line-2); }
+.pane-select-button .label { display: flex; align-items: center; gap: 8px; }
+.pane-select-button .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+.pane-select-button .dot.deleted { background: var(--danger); box-shadow: 0 0 6px var(--danger); }
+.pane-select-button .chev { color: var(--ink-2); font-size: 10px; transition: transform 0.15s ease; }
+.pane-select-button.open .chev { transform: rotate(180deg); }
+.pane-select-menu {
+  position: absolute;
+  top: calc(100% + 4px); left: 0; right: 0;
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  z-index: 12;
+  overflow: hidden;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+.pane-select-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  color: var(--ink-0);
+  font-size: 13px;
+  transition: background 0.1s ease;
+}
+.pane-select-item:hover { background: var(--bg-3); }
+.pane-select-item.active { background: var(--bg-3); color: var(--ink-0); }
+.pane-select-item .meta { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--ink-2); }
+.pane-select-item .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.pane-select-item .dot.deleted { background: var(--danger); }
+
+.deleted-row {
+  padding: 11px 12px;
+  display: grid;
+  grid-template-columns: 20px 1fr;
+  gap: 11px; align-items: center;
+}
+.deleted-icon { width: 16px; height: 20px; background: var(--bg-3); border-radius: 2px; border: 1px dashed var(--line-2); position: relative; opacity: 0.6; }
+.deleted-icon::after {
+  content: '';
+  position: absolute; left: 50%; top: 50%;
+  width: 110%; height: 1px;
+  background: var(--danger);
+  transform: translate(-50%, -50%) rotate(-18deg);
+  opacity: 0.7;
+}
+.deleted-name { font-size: 13.5px; color: var(--ink-1); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-decoration: line-through; text-decoration-color: var(--ink-3); text-decoration-thickness: 1px; }
+.deleted-meta { font-family: var(--mono); font-size: 11.5px; color: var(--ink-2); margin-top: 3px; }
+.deleted-meta .gc { color: var(--danger); opacity: 0.85; }
+
 /* ===== Center stage ===== */
 .stage-wrap {
   position: relative;
@@ -1062,6 +1198,172 @@ function IndexingStatusRow({ job }) {
 }
 
 /* ===== Left panel ===== */
+/* Swipe-left row: pointer drag reveals an action button under the foreground.
+   - Drag left ≥ ACTION_WIDTH/2 to snap open, otherwise snap closed.
+   - Click the revealed action: play removal animation, then call onAction.
+   - Dragging with measurable movement suppresses the click on body. */
+const ACTION_WIDTH = 78;
+const OPEN_THRESHOLD = 36;
+const DRAG_SLOP = 5;
+
+function SwipeRow({ actionKind, actionLabel, onAction, onBodyClick, children }) {
+  const [open, setOpen] = useState(false);
+  const [dragX, setDragX] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const startRef = useRef(null);
+  const movedRef = useRef(false);
+  const wrapRef = useRef(null);
+
+  const onPointerDown = (e) => {
+    if (e.button !== undefined && e.button !== 0) return;
+    startRef.current = { x: e.clientX, y: e.clientY };
+    movedRef.current = false;
+    setDragging(true);
+    try { e.currentTarget.setPointerCapture?.(e.pointerId); } catch {}
+  };
+  const onPointerMove = (e) => {
+    if (!startRef.current) return;
+    const dx = e.clientX - startRef.current.x;
+    const dy = e.clientY - startRef.current.y;
+    if (!movedRef.current && (Math.abs(dx) > DRAG_SLOP || Math.abs(dy) > DRAG_SLOP)) {
+      movedRef.current = true;
+    }
+    // Allow leftward drag up to ACTION_WIDTH; allow snap-closed if open.
+    let next;
+    if (open) {
+      next = Math.max(-ACTION_WIDTH, Math.min(0, -ACTION_WIDTH + Math.max(0, dx)));
+    } else {
+      next = Math.max(-ACTION_WIDTH, Math.min(0, dx));
+    }
+    setDragX(next);
+  };
+  const onPointerUp = () => {
+    if (!startRef.current) { setDragging(false); return; }
+    const finalX = dragX;
+    setDragging(false);
+    setDragX(0);
+    if (finalX <= -OPEN_THRESHOLD) setOpen(true);
+    else setOpen(false);
+    startRef.current = null;
+  };
+  const onPointerCancel = () => {
+    setDragging(false);
+    setDragX(0);
+    startRef.current = null;
+  };
+
+  const handleBodyClick = (e) => {
+    if (movedRef.current) { e.preventDefault(); e.stopPropagation(); return; }
+    if (open) { setOpen(false); return; }
+    onBodyClick?.(e);
+  };
+
+  const handleAction = (e) => {
+    e.stopPropagation();
+    setRemoving(true);
+    setTimeout(() => { onAction?.(); }, 260);
+  };
+
+  // Close if the user clicks/scrolls anywhere else.
+  useEffect(() => {
+    if (!open) return;
+    const close = (ev) => {
+      if (wrapRef.current && wrapRef.current.contains(ev.target)) return;
+      setOpen(false);
+    };
+    document.addEventListener('pointerdown', close);
+    return () => document.removeEventListener('pointerdown', close);
+  }, [open]);
+
+  const tx = dragging ? dragX : (open ? -ACTION_WIDTH : 0);
+
+  return (
+    <div ref={wrapRef} className={'swipe-wrap' + (open ? ' open' : '') + (removing ? ' removing' : '')}>
+      <div
+        className={'swipe-action ' + actionKind}
+        onClick={handleAction}
+        title={actionLabel}
+      >
+        {actionKind === 'delete' ? (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg>
+        ) : (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>
+        )}
+      </div>
+      <div
+        className={'swipe-foreground' + (dragging ? ' dragging' : '')}
+        style={{ transform: `translateX(${tx}px)` }}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerCancel}
+        onClick={handleBodyClick}
+      >
+        {children}
+        <span className="swipe-hint">← swipe</span>
+      </div>
+    </div>
+  );
+}
+
+function PaneSelect({ value, onChange, namespaceCount, deletedCount }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('pointerdown', close);
+    return () => document.removeEventListener('pointerdown', close);
+  }, [open]);
+  const items = [
+    { id: 'namespace', label: 'namespace', count: namespaceCount, dot: '' },
+    { id: 'deleted',   label: 'deleted files', count: deletedCount, dot: 'deleted' },
+  ];
+  const current = items.find(i => i.id === value) || items[0];
+  return (
+    <div ref={ref} className="pane-select">
+      <div className={'pane-select-button' + (open ? ' open' : '')} onClick={() => setOpen(o => !o)}>
+        <span className="label">
+          <span className={'dot ' + (current.dot)}></span>
+          <span>{current.label}</span>
+          <span className="count" style={{ fontFamily: 'var(--mono)', color: 'var(--ink-1)', background: 'var(--bg-3)', padding: '2px 7px', borderRadius: 5, fontSize: 11.5, marginLeft: 4 }}>{current.count}</span>
+        </span>
+        <span className="chev">▾</span>
+      </div>
+      {open && (
+        <div className="pane-select-menu">
+          {items.map(i => (
+            <div
+              key={i.id}
+              className={'pane-select-item' + (i.id === value ? ' active' : '')}
+              onClick={() => { onChange(i.id); setOpen(false); }}
+            >
+              <span className={'dot ' + i.dot}></span>
+              <span>{i.label}</span>
+              <span className="meta">{i.count}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function formatRelative(unixSec) {
+  const diff = Math.max(0, Date.now() / 1000 - unixSec);
+  if (diff < 60) return `${Math.floor(diff)}s ago`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
+}
+
+function formatGc(seconds) {
+  const s = Math.max(0, Math.floor(seconds));
+  if (s >= 60) return `${Math.floor(s / 60)}m${s % 60 > 0 ? ' ' + (s % 60) + 's' : ''}`;
+  return `${s}s`;
+}
+
 function LeftPanel({ state, api }) {
   const [dragOver, setDragOver] = useState(false);
   const [queuedFile, setQueuedFile] = useState(null);
@@ -1133,36 +1435,74 @@ function LeftPanel({ state, api }) {
       </div>
 
       <div className="panel-section" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, paddingBottom: 0 }}>
-        <div className="panel-title">
-          <span>namespace</span>
-          <span className="count">{state.files.length}</span>
-        </div>
-        <div className="file-list">
-          {state.files.length === 0 && (
-            <div style={{ padding: '14px 8px', fontSize: 13, color: 'var(--ink-2)', fontFamily: 'var(--mono)', lineHeight: 1.6 }}>
-              namespace is empty.<br/>drop a file or seed one above.
-            </div>
-          )}
-          {state.files.map(f => (
-            <div
-              key={f.filename}
-              className={'file-row' + (state.selectedFile === f.filename ? ' active' : '')}
-              onClick={() => api.selectFile(f.filename)}
-            >
-              <div className="file-icon"></div>
-              <div style={{ minWidth: 0 }}>
-                <div className="file-name">{f.filename}</div>
-                <div className="file-meta">{humanSize(f.size)} · {f.chunks.length} chunks</div>
+        <PaneSelect
+          value={state.pane}
+          onChange={(id) => { api.setPane(id); if (id === 'deleted') api.refreshDeleted(); }}
+          namespaceCount={state.files.length}
+          deletedCount={state.deletedFiles.length}
+        />
+        {state.pane === 'namespace' ? (
+          <div className="file-list">
+            {state.files.length === 0 && (
+              <div style={{ padding: '14px 8px', fontSize: 13, color: 'var(--ink-2)', fontFamily: 'var(--mono)', lineHeight: 1.6 }}>
+                namespace is empty.<br/>drop a file or seed one above.
               </div>
-              <div className="file-chunks" title="chunk → server">
-                {f.chunks.slice(0, 8).map(c => (
-                  <div key={c.handle} className={'chunk-pill ' + COLORS[c.serverIdx]} />
-                ))}
-                {f.chunks.length > 8 && <div style={{ color: 'var(--ink-3)', fontSize: 10, fontFamily: 'var(--mono)', marginLeft: 3 }}>+{f.chunks.length - 8}</div>}
+            )}
+            {state.files.map(f => (
+              <SwipeRow
+                key={f.filename}
+                actionKind="delete"
+                actionLabel="delete"
+                onAction={() => api.deleteFile(f.filename)}
+                onBodyClick={() => api.selectFile(f.filename)}
+              >
+                <div
+                  className={'file-row' + (state.selectedFile === f.filename ? ' active' : '')}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <div className="file-icon"></div>
+                  <div style={{ minWidth: 0 }}>
+                    <div className="file-name">{f.filename}</div>
+                    <div className="file-meta">{humanSize(f.size)} · {f.chunks.length} chunks</div>
+                  </div>
+                  <div className="file-chunks" title="chunk → server">
+                    {f.chunks.slice(0, 8).map(c => (
+                      <div key={c.handle} className={'chunk-pill ' + COLORS[c.serverIdx]} />
+                    ))}
+                    {f.chunks.length > 8 && <div style={{ color: 'var(--ink-3)', fontSize: 10, fontFamily: 'var(--mono)', marginLeft: 3 }}>+{f.chunks.length - 8}</div>}
+                  </div>
+                </div>
+              </SwipeRow>
+            ))}
+          </div>
+        ) : (
+          <div className="file-list">
+            {state.deletedFiles.length === 0 && (
+              <div style={{ padding: '14px 8px', fontSize: 13, color: 'var(--ink-2)', fontFamily: 'var(--mono)', lineHeight: 1.6 }}>
+                no deleted files.<br/>swipe a file in <span style={{ color: 'var(--ink-1)' }}>namespace</span> to delete it.
               </div>
-            </div>
-          ))}
-        </div>
+            )}
+            {state.deletedFiles.map(d => (
+              <SwipeRow
+                key={d.internal_name}
+                actionKind="recover"
+                actionLabel="recover"
+                onAction={() => api.recoverFile(d.internal_name)}
+              >
+                <div className="deleted-row">
+                  <div className="deleted-icon"></div>
+                  <div style={{ minWidth: 0 }}>
+                    <div className="deleted-name">{d.display_name}</div>
+                    <div className="deleted-meta">
+                      {d.file_size_human} · deleted {formatRelative(d.deleted_at_unix)}
+                      <span className="gc"> · gc in {formatGc(d.seconds_until_gc)}</span>
+                    </div>
+                  </div>
+                </div>
+              </SwipeRow>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1494,6 +1834,8 @@ function App() {
   const [tweaks, setTweaks] = useState(TWEAK_DEFAULTS);
   const [tweaksVisible, setTweaksVisible] = useState(false);
   const [indexJobs, setIndexJobs] = useState([]);
+  const [deletedFiles, setDeletedFiles] = useState([]);
+  const [pane, setPane] = useState('namespace');  // 'namespace' | 'deleted'
   const toastIdRef = useRef(0);
   const jobIdRef = useRef(0);
   const filesRef = useRef(files);
@@ -1761,7 +2103,7 @@ function App() {
     try { window.parent.postMessage({ type: '__edit_mode_set_keys', edits: tweaks }, '*'); } catch {}
   }, [tweaks]);
 
-  useEffect(() => { refreshFiles(); }, []);
+  useEffect(() => { refreshFiles(); refreshDeleted(); }, []);
 
   const clearSearch = () => {
     setLastQuery('');
@@ -1773,8 +2115,61 @@ function App() {
     setStage('idle');
   };
 
-  const api = { upload, search, toast, selectFile: setSelectedFile, clearSearch };
-  const state = { files, stage, highlightServer, serverMatches, matchedHandles, results, lastQuery, latencyMs, selectedFile, sec, tweaks, indexJobs };
+  const refreshDeleted = async () => {
+    try {
+      const res = await fetch('/api/files/deleted').then(r => r.json());
+      if (Array.isArray(res)) {
+        setDeletedFiles(res);
+      } else if (res && res.error) {
+        toast('deleted-list: ' + res.error, 'err');
+      }
+    } catch (e) {
+      toast('deleted-list failed: ' + e.message, 'err');
+    }
+  };
+
+  // Refresh the deleted-files list when that pane is active.
+  useEffect(() => {
+    if (pane !== 'deleted') return;
+    refreshDeleted();
+    const t = setInterval(refreshDeleted, 5000);
+    return () => clearInterval(t);
+  }, [pane]);
+
+  const deleteFile = async (filename) => {
+    try {
+      const res = await fetch('/api/files/' + encodeURIComponent(filename), { method: 'DELETE' }).then(r => r.json());
+      if (res.error) { toast(res.error, 'err'); return false; }
+      toast(`deleted ${filename}`, 'ok');
+      if (selectedFile === filename) setSelectedFile(null);
+      await Promise.all([refreshFiles(), refreshDeleted()]);
+      return true;
+    } catch (e) {
+      toast('delete failed: ' + e.message, 'err');
+      return false;
+    }
+  };
+
+  const recoverFile = async (internalName) => {
+    try {
+      const res = await fetch('/api/files/' + encodeURIComponent(internalName) + '/recover', { method: 'POST' }).then(r => r.json());
+      if (res.error) { toast(res.error, 'err'); return false; }
+      toast(`recovered ${res.restored_filename}`, 'ok');
+      await Promise.all([refreshFiles(), refreshDeleted()]);
+      return true;
+    } catch (e) {
+      toast('recover failed: ' + e.message, 'err');
+      return false;
+    }
+  };
+
+  const api = {
+    upload, search, toast,
+    selectFile: setSelectedFile, clearSearch,
+    deleteFile, recoverFile, refreshDeleted,
+    setPane,
+  };
+  const state = { files, stage, highlightServer, serverMatches, matchedHandles, results, lastQuery, latencyMs, selectedFile, sec, tweaks, indexJobs, deletedFiles, pane };
   const totalChunks = files.reduce((a, f) => a + f.chunks.length, 0);
 
   return (
